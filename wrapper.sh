@@ -59,12 +59,30 @@ echo "[+] Downloaded successfully"
 if [[ $SCAN_TYPE == "linpeas" ]]; then
     chmod +x "$SCRIPT_PATH"
     
-    echo "[*] Running linpeas (this may take a few minutes)..."
-    echo "[*] Progress will be shown, output is being captured..."
+    echo "[*] Running linpeas (this may take 2-5 minutes)..."
+    echo "[*] Output is being saved to file..."
     echo ""
     
-    # Run linpeas and save output (show progress)
-    "$SCRIPT_PATH" 2>&1 | tee "$TMP_OUTPUT"
+    # Run linpeas directly to file (no pipe/tee to avoid hanging)
+    "$SCRIPT_PATH" > "$TMP_OUTPUT" 2>&1 &
+    LINPEAS_PID=$!
+    
+    # Show progress while it runs
+    echo "[*] Linpeas running (PID: $LINPEAS_PID)..."
+    while kill -0 $LINPEAS_PID 2>/dev/null; do
+        if [[ -f "$TMP_OUTPUT" ]]; then
+            CURRENT_SIZE=$(stat -f%z "$TMP_OUTPUT" 2>/dev/null || stat -c%s "$TMP_OUTPUT" 2>/dev/null || echo "0")
+            echo -ne "\r[*] Output size: $((CURRENT_SIZE / 1024)) KB   "
+        fi
+        sleep 2
+    done
+    
+    # Wait for process to fully complete
+    wait $LINPEAS_PID
+    EXIT_CODE=$?
+    
+    echo ""
+    echo "[+] Linpeas completed with exit code: $EXIT_CODE"
     
     # Check if output was generated
     if [[ ! -f "$TMP_OUTPUT" ]] || [[ ! -s "$TMP_OUTPUT" ]]; then
@@ -73,8 +91,13 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
     fi
     
     OUTPUT_SIZE=$(stat -f%z "$TMP_OUTPUT" 2>/dev/null || stat -c%s "$TMP_OUTPUT" 2>/dev/null)
+    echo "[+] Final output size: $((OUTPUT_SIZE / 1024)) KB"
     echo ""
-    echo "[*] Scan complete. Output size: $((OUTPUT_SIZE / 1024)) KB"
+    echo "[*] Last 10 lines of output:"
+    echo "----------------------------------------"
+    tail -10 "$TMP_OUTPUT"
+    echo "----------------------------------------"
+    echo ""
     echo "[*] Transferring to Kali host..."
     echo ""
     
