@@ -2,6 +2,7 @@
 """
 ParsingPeas Parser
 Parses linpeas/winpeas output and generates interactive HTML reports
+Now with lazy-loading for performance!
 """
 
 import os
@@ -20,13 +21,11 @@ def strip_ansi_codes(text):
 def convert_ansi_to_html_colors(text, for_terminal=True):
     """
     Convert ANSI codes to colored HTML
-    for_terminal: True = terminal view formatting, False = parsed view formatting
     """
     lines = text.split('\n')
     result_lines = []
     
     for line in lines:
-        # Check if this is a header line
         is_header = '\x1B[1;32m' in line
         has_box = bool(re.search(r'[\u2554\u2557\u2551\u255a\u255d\u2550]', line))
         
@@ -34,12 +33,12 @@ def convert_ansi_to_html_colors(text, for_terminal=True):
         
         # Map ANSI codes to HTML colors
         color_map = [
-            (r'\x1B\[1;31m', '<span style="color:#ff6b6b;font-weight:bold">'),  # Bold Red
-            (r'\x1B\[1;32m', '<span style="color:#50fa7b;font-weight:bold">'),  # Bold Green
-            (r'\x1B\[1;33m', '<span style="color:#f1fa8c;font-weight:bold">'),  # Bold Yellow
-            (r'\x1B\[1;34m', '<span style="color:#8be9fd;font-weight:bold">'),  # Bold Blue
-            (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),  # Bold Magenta
-            (r'\x1B\[1;36m', '<span style="color:#8be9fd;font-weight:bold">'),  # Bold Cyan
+            (r'\x1B\[1;31m', '<span style="color:#ff6b6b;font-weight:bold">'),
+            (r'\x1B\[1;32m', '<span style="color:#50fa7b;font-weight:bold">'),
+            (r'\x1B\[1;33m', '<span style="color:#f1fa8c;font-weight:bold">'),
+            (r'\x1B\[1;34m', '<span style="color:#8be9fd;font-weight:bold">'),
+            (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),
+            (r'\x1B\[1;36m', '<span style="color:#8be9fd;font-weight:bold">'),
             (r'\x1B\[31m', '<span style="color:#ff5555">'),
             (r'\x1B\[32m', '<span style="color:#50fa7b">'),
             (r'\x1B\[33m', '<span style="color:#f1fa8c">'),
@@ -52,11 +51,9 @@ def convert_ansi_to_html_colors(text, for_terminal=True):
             (r'\x1B\[m', '</span>'),
         ]
         
-        # Apply color conversions
         for pattern, replacement in color_map:
             processed = re.sub(pattern, replacement, processed)
         
-        # Remove remaining ANSI codes
         processed = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', processed)
         
         # Escape HTML but preserve spans
@@ -65,14 +62,11 @@ def convert_ansi_to_html_colors(text, for_terminal=True):
         processed = processed.replace('&lt;span', '<span').replace('&lt;/span&gt;', '</span>')
         processed = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\1">', processed)
         
-        # Format based on view type
         if for_terminal:
-            # Terminal view: use divs with header highlighting
             if is_header and has_box:
                 processed = f'<div class="term-header">{processed}</div>'
             else:
                 processed = f'{processed}<br>'
-        # Parsed view: just keep the spans, wrap in div for spacing
         
         result_lines.append(processed)
     
@@ -80,12 +74,9 @@ def convert_ansi_to_html_colors(text, for_terminal=True):
 
 
 def categorize_sections(sections):
-    """
-    Organize sections into categories based on linpeas structure
-    """
+    """Organize sections into categories"""
     categories = OrderedDict()
     
-    # Linpeas main category keywords
     category_keywords = [
         ('System Information', ['OS', 'Hostname', 'User & Groups', 'Sudo version', 'PATH', 'Date', 'System stats']),
         ('Container', ['Container', 'Docker', 'Kubernetes', 'LXC']),
@@ -118,9 +109,7 @@ def categorize_sections(sections):
 
 
 def parse_linpeas_by_ansi_colors(content):
-    """
-    Parse linpeas by detecting lines with BOLD GREEN (1;32m) color code
-    """
+    """Parse linpeas output"""
     lines = content.split('\n')
     sections = OrderedDict()
     current_section = None
@@ -132,12 +121,10 @@ def parse_linpeas_by_ansi_colors(content):
         has_box = bool(re.search(r'[\u2554\u2557\u2551\u255a\u255d\u2550]', line))
         clean_line = strip_ansi_codes(line).strip()
         
-        # Header detection
         if has_bold_green and has_box:
             if current_section and current_content:
                 sections[current_section] = '\n'.join(current_content)
             
-            # Extract title
             title = clean_line
             for char in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c':
                 title = title.replace(char, '')
@@ -150,7 +137,6 @@ def parse_linpeas_by_ansi_colors(content):
                 print(f"  [{header_count}] {title[:70]}")
                 continue
         
-        # Skip decoration lines
         if clean_line and all(c in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c ' for c in clean_line):
             continue
         
@@ -200,11 +186,11 @@ def extract_critical_findings(content):
 
 
 def generate_html_report(filepath, hostname, scan_type):
-    """Generate interactive HTML report"""
+    """Generate interactive HTML report with lazy-loading"""
     
-    print(f"\n\U0001f4ca Parsing {filepath}...\n")
+    print(f"\n🔥 ParsingPeas - Lazy-Loading Mode\n")
+    print(f"📊 Parsing {filepath}...\n")
     
-    # Read file with proper encoding
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             raw_content = f.read()
@@ -212,19 +198,19 @@ def generate_html_report(filepath, hostname, scan_type):
         with open(filepath, 'rb') as f:
             raw_content = f.read().decode('utf-8', errors='ignore')
     
-    print("\U0001f50d Detecting sections...")
+    print("🔍 Detecting sections...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
     
-    print("\n\U0001f4c1 Organizing into categories...")
+    print("\n📁 Organizing into categories...")
     categories = categorize_sections(sections)
     for cat_name, cat_sections in categories.items():
         print(f"  {cat_name}: {len(cat_sections)} sections")
     
-    print("\n\u26a0\ufe0f  Extracting critical findings...")
+    print("\n⚠️  Extracting critical findings...")
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    print("\n\U0001f4bb Generating views...")
+    print("\n💾 Pre-processing views...")
     terminal_html = convert_ansi_to_html_colors(raw_content, for_terminal=True)
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -234,64 +220,88 @@ def generate_html_report(filepath, hostname, scan_type):
     section_idx = 0
     for cat_name, cat_sections in categories.items():
         cat_id = cat_name.replace(' ', '_').replace('/', '_')
-        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{cat_id}\")">▶ {escape(cat_name)} ({len(cat_sections)})</div>'
+        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{cat_id}\")"▶ {escape(cat_name)} ({len(cat_sections)})</div>'
         toc_html += f'<ul class="cat-sections" id="cat-{cat_id}">'
         for section_title in cat_sections:
             toc_html += f'<li><a href="#s{section_idx}" onclick="jump({section_idx}); return false;">{escape(section_title[:70])}</a></li>'
             section_idx += 1
         toc_html += '</ul></li>'
     
-    # Generate sections WITH COLORS (use ANSI-to-HTML conversion)
-    secs = ''.join([
-        f'<div class="sec" id="s{i}">'
-        f'<div class="st" onclick="tog(this)">\u25b6 {escape(t)}</div>'
-        f'<div class="sc">{convert_ansi_to_html_colors(c, for_terminal=False)}</div>'
-        f'</div>'
-        for i, (t, c) in enumerate(sections.items())
-    ])
+    # Generate section shells (content in templates)
+    secs = ''
+    templates = ''
+    for i, (t, c) in enumerate(sections.items()):
+        # Section shell (initially empty)
+        secs += f'<div class="sec" id="s{i}"><div class="st" onclick="loadSection({i})"▶ {escape(t)}</div><div class="sc" id="sc{i}"></div></div>'
+        # Content stored in template (not rendered)
+        templates += f'<template id="tpl{i}">{convert_ansi_to_html_colors(c, for_terminal=False)}</template>'
     
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript
-    javascript = """
+    # JavaScript with lazy-loading
+    javascript = f"""
 <script>
-function sw(v) {
+const loaded = new Set();
+const terminalLoaded = false;
+
+function sw(v) {{
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
     document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
-}
+    
+    // Lazy-load terminal view
+    if (v === 1 && !window.terminalLoaded) {{
+        console.log('⚡ Loading terminal view...');
+        const tpl = document.getElementById('terminal-tpl');
+        document.getElementById('terminal-content').innerHTML = tpl.innerHTML;
+        window.terminalLoaded = true;
+    }}
+}}
 
-function tog(e) {
-    let c = e.nextElementSibling;
-    c.style.display = c.style.display === 'none' ? 'block' : 'none';
-    e.innerHTML = c.style.display === 'none' ? '\u25b6 ' + e.innerHTML.slice(2) : '\u25bc ' + e.innerHTML.slice(2);
-}
+function loadSection(i) {{
+    const container = document.getElementById('sc' + i);
+    const header = container.previousElementSibling;
+    
+    // Toggle visibility
+    const isVisible = container.style.display !== 'none';
+    container.style.display = isVisible ? 'none' : 'block';
+    header.innerHTML = (isVisible ? '▶ ' : '▼ ') + header.innerHTML.slice(2);
+    
+    // Lazy-load content if not already loaded
+    if (!loaded.has(i) && !isVisible) {{
+        console.log('⚡ Loading section ' + i);
+        const tpl = document.getElementById('tpl' + i);
+        container.innerHTML = tpl.innerHTML;
+        loaded.add(i);
+    }}
+}}
 
-function toggleCat(id) {
+function toggleCat(id) {{
     let cat = document.getElementById('cat-' + id);
     let title = event.target;
     cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
-    title.innerHTML = cat.style.display === 'none' ? '\u25b6 ' + title.innerHTML.slice(2) : '\u25bc ' + title.innerHTML.slice(2);
-}
+    title.innerHTML = cat.style.display === 'none' ? '▶ ' + title.innerHTML.slice(2) : '▼ ' + title.innerHTML.slice(2);
+}}
 
-function jump(i) {
+function jump(i) {{
     let s = document.getElementById('s' + i);
-    s.scrollIntoView({behavior: 'smooth'});
-    let t = s.querySelector('.st');
-    let c = s.querySelector('.sc');
-    if (c.style.display === 'none') tog(t);
-}
+    s.scrollIntoView({{behavior: 'smooth'}});
+    loadSection(i);
+}}
 
-document.getElementById('sb').addEventListener('input', e => {
+document.getElementById('sb').addEventListener('input', e => {{
     let q = e.target.value.toLowerCase();
-    document.querySelectorAll('.sec').forEach(s => {
+    document.querySelectorAll('.sec').forEach(s => {{
         s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
-    });
-});
+    }});
+}});
+
+console.log('🔥 ParsingPeas loaded! Sections: {len(sections)}');
+console.log('⚡ Lazy-loading enabled - sections load on demand');
 </script>
     """
     
-    # HTML template with FIXED TERMINAL COLORS
+    # HTML with lazy-loading architecture
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -301,6 +311,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .hdr h1{{font-size:2.5em;text-shadow:0 0 10px #00ff00;color:#00ff00}}
 .info{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-top:20px}}
 .info div{{background:rgba(0,255,0,0.1);padding:10px;border-radius:5px;border-left:3px solid #00ff00;color:#ffffff}}
+.badge{{background:#00ff00;color:#0a0e27;padding:3px 8px;border-radius:3px;font-size:0.7em;font-weight:bold;margin-left:10px}}
 .vb{{padding:12px 24px;background:#1a1a2e;border:2px solid #00ff00;color:#00ff00;cursor:pointer;border-radius:5px;font:14px 'Courier New',monospace;margin-right:10px;transition:all .3s}}
 .vb:hover{{background:rgba(0,255,0,0.1)}}
 .vb.active{{background:#00ff00;color:#0a0e27;font-weight:bold}}
@@ -335,16 +346,23 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 </style></head><body>
-<div class="hdr"><h1>\U0001f95a ParsingPeas Report</h1>
+<div class="hdr"><h1>🥒 ParsingPeas Report<span class="badge">LAZY</span></h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
-<div><button class="vb active" onclick="sw(0)">\U0001f4ca Parsed</button><button class="vb" onclick="sw(1)">\U0001f4bb Terminal</button></div>
+<div><button class="vb active" onclick="sw(0)">📊 Parsed</button><button class="vb" onclick="sw(1)">💻 Terminal</button></div>
 <div id="p" class="vc active">
-<div class="toc"><h2>\U0001f4cb Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
-<input type="text" class="sb" id="sb" placeholder="\U0001f50d Search..."/>
-<div class="hl"><h2>\u26a0\ufe0f Critical Findings ({len(findings)})</h2>{finds}</div>
+<div class="toc"><h2>📋 Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
+<input type="text" class="sb" id="sb" placeholder="🔍 Search..."/>
+<div class="hl"><h2>⚠️ Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="\U0001f50d Search raw..."/><div class="raw">{terminal_html}</div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="🔍 Search raw..."/><div class="raw" id="terminal-content"><p style="color:#f1fa8c;padding:20px">⚡ Click to load terminal view (lazy-loaded for performance)</p></div></div>
+
+<!-- Hidden templates for lazy-loading -->
+<div style="display:none">
+{templates}
+<template id="terminal-tpl">{terminal_html}</template>
+</div>
+
 {javascript}
 </body></html>'''
     
@@ -355,7 +373,8 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
     with open(report_path, 'w', encoding='utf-8', errors='xmlcharrefreplace') as f:
         f.write(html)
     
-    print(f"\n\u2705 Report generated: {report_path}\n")
+    print(f"\n✅ Report generated: {report_path}")
+    print(f"⚡ Lazy-loading enabled - instant page load!\n")
     return report_path
 
 
