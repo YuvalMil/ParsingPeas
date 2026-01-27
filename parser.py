@@ -191,9 +191,14 @@ def generate_html_report(filepath, hostname, scan_type):
     toc = ''.join([f'<li><a href="#s{i}" onclick="jump({i}); return false;">{escape(t[:70])}</a></li>' 
                    for i, t in enumerate(sections.keys())])
     
-    # Generate sections
-    secs = ''.join([f'<div class="sec" id="s{i}"><div class="st" onclick="tog(this)">▶ {escape(t)}</div><div class="sc">{escape(c)}</div></div>'
-                    for i, (t, c) in enumerate(sections.items())])
+    # Generate sections - STRIP ANSI CODES from content for clean parsed view
+    secs = ''.join([
+        f'<div class="sec" id="s{i}">'
+        f'<div class="st" onclick="tog(this)">▶ {escape(t)}</div>'
+        f'<div class="sc">{escape(strip_ansi_codes(c))}</div>'  # <-- STRIP ANSI HERE!
+        f'</div>'
+        for i, (t, c) in enumerate(sections.items())
+    ])
     
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
