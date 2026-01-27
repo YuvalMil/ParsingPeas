@@ -17,26 +17,26 @@ def strip_ansi_codes(text):
     return ansi_escape.sub('', text)
 
 
-def convert_ansi_to_html_colors(text):
+def convert_ansi_to_html_colors(text, for_terminal=True):
     """
-    Convert ANSI codes to colored HTML for terminal view
+    Convert ANSI codes to colored HTML
+    for_terminal: True = terminal view formatting, False = parsed view formatting
     """
     lines = text.split('\n')
     result_lines = []
     
     for line in lines:
-        # Check if this is a header line (has BOLD GREEN color code 1;32m)
+        # Check if this is a header line
         is_header = '\x1B[1;32m' in line
-        has_box = bool(re.search(r'[╔╗║╚╝═]', line))
+        has_box = bool(re.search(r'[\u2554\u2557\u2551\u255a\u255d\u2550]', line))
         
-        # Process the line for colors
         processed = line
         
         # Map ANSI codes to HTML colors
         color_map = [
             (r'\x1B\[1;31m', '<span style="color:#ff6b6b;font-weight:bold">'),  # Bold Red
             (r'\x1B\[1;32m', '<span style="color:#50fa7b;font-weight:bold">'),  # Bold Green
-            (r'\x1B\[1;33m', '<span style="color:#ffff00;font-weight:bold">'),  # Bold Yellow
+            (r'\x1B\[1;33m', '<span style="color:#f1fa8c;font-weight:bold">'),  # Bold Yellow
             (r'\x1B\[1;34m', '<span style="color:#8be9fd;font-weight:bold">'),  # Bold Blue
             (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),  # Bold Magenta
             (r'\x1B\[1;36m', '<span style="color:#8be9fd;font-weight:bold">'),  # Bold Cyan
@@ -65,11 +65,14 @@ def convert_ansi_to_html_colors(text):
         processed = processed.replace('&lt;span', '<span').replace('&lt;/span&gt;', '</span>')
         processed = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\1">', processed)
         
-        # Wrap headers
-        if is_header and has_box:
-            processed = f'<div class="term-header">{processed}</div>'
-        else:
-            processed = f'{processed}<br>'
+        # Format based on view type
+        if for_terminal:
+            # Terminal view: use divs with header highlighting
+            if is_header and has_box:
+                processed = f'<div class="term-header">{processed}</div>'
+            else:
+                processed = f'{processed}<br>'
+        # Parsed view: just keep the spans, wrap in div for spacing
         
         result_lines.append(processed)
     
@@ -79,27 +82,24 @@ def convert_ansi_to_html_colors(text):
 def categorize_sections(sections):
     """
     Organize sections into categories based on linpeas structure
-    Returns OrderedDict of categories containing section lists
     """
     categories = OrderedDict()
-    current_category = "System Information"
     
     # Linpeas main category keywords
     category_keywords = [
-        ('System Information', ['OS', 'Hostname', 'User & Groups', 'Sudo version', 'PATH']),
-        ('Container', ['Container', 'Docker', 'Kubernetes']),
-        ('Cloud/VM', ['Cloud', 'AWS', 'Azure', 'GCP', 'VM']),
-        ('Processes & Cron', ['Processes', 'Binary processes', 'Cron', 'Systemd', 'Timers']),
-        ('Network Information', ['Network', 'Interfaces', 'Active Ports', 'Listening', 'Routes']),
-        ('Users & Groups', ['Users', 'Groups', 'IDs with shell', 'Password Policy']),
-        ('Software Information', ['Software', 'Useful software', 'Installed']),
-        ('Interesting Files', ['SUID', 'Writable', 'Capabilities', 'Files', 'Backup', 'Logs']),
-        ('API Keys & Secrets', ['API', 'password', 'credential', 'token', 'secret', 'Generic API']),
-        ('Exploits & CVEs', ['CVE', 'Exploit', 'Vulnerable', 'Sudo', 'pkexec']),
+        ('System Information', ['OS', 'Hostname', 'User & Groups', 'Sudo version', 'PATH', 'Date', 'System stats']),
+        ('Container', ['Container', 'Docker', 'Kubernetes', 'LXC']),
+        ('Cloud/VM', ['Cloud', 'AWS', 'Azure', 'GCP', 'VM', 'Hypervisor']),
+        ('Processes & Cron', ['Processes', 'Binary processes', 'Cron', 'Systemd', 'Timers', 'Services']),
+        ('Network Information', ['Network', 'Interfaces', 'Active Ports', 'Listening', 'Routes', 'Hosts']),
+        ('Users & Groups', ['Users', 'Groups', 'IDs with shell', 'Password Policy', 'Last', 'Login']),
+        ('Software Information', ['Software', 'Useful software', 'Installed', 'Compilers']),
+        ('Interesting Files', ['SUID', 'Writable', 'Capabilities', 'Files', 'Backup', 'Logs', 'Web', 'ssh', 'Credentials']),
+        ('API Keys & Secrets', ['API', 'password', 'credential', 'token', 'secret', 'Generic API', 'Searching']),
+        ('Exploits & CVEs', ['CVE', 'Exploit', 'Vulnerable', 'Sudo', 'pkexec', 'Polkit']),
     ]
     
     for title in sections.keys():
-        # Try to match to a category
         matched = False
         for cat_name, keywords in category_keywords:
             if any(keyword.lower() in title.lower() for keyword in keywords):
@@ -109,7 +109,6 @@ def categorize_sections(sections):
                 matched = True
                 break
         
-        # If no match, use current or create "Other"
         if not matched:
             if "Other" not in categories:
                 categories["Other"] = []
@@ -130,7 +129,7 @@ def parse_linpeas_by_ansi_colors(content):
     
     for line in lines:
         has_bold_green = '\x1B[1;32m' in line
-        has_box = bool(re.search(r'[╔╗║╚╝═]', line))
+        has_box = bool(re.search(r'[\u2554\u2557\u2551\u255a\u255d\u2550]', line))
         clean_line = strip_ansi_codes(line).strip()
         
         # Header detection
@@ -140,7 +139,7 @@ def parse_linpeas_by_ansi_colors(content):
             
             # Extract title
             title = clean_line
-            for char in '╔╗╚╝═║─│┌┐└┘┬┴├┤┼':
+            for char in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c':
                 title = title.replace(char, '')
             title = title.strip()
             
@@ -152,7 +151,7 @@ def parse_linpeas_by_ansi_colors(content):
                 continue
         
         # Skip decoration lines
-        if clean_line and all(c in '╔╗╚╝═║─│┌┐└┘┬┴├┤┼ ' for c in clean_line):
+        if clean_line and all(c in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c ' for c in clean_line):
             continue
         
         if current_section:
@@ -187,7 +186,7 @@ def extract_critical_findings(content):
         line = line.strip()
         if not line or len(line) < 15:
             continue
-        if all(c in '╔╗╚╝═║─│┌┐└┘┬┴├┤┼ ' for c in line):
+        if all(c in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c ' for c in line):
             continue
         
         for pattern, severity in patterns:
@@ -203,7 +202,7 @@ def extract_critical_findings(content):
 def generate_html_report(filepath, hostname, scan_type):
     """Generate interactive HTML report"""
     
-    print(f"\n📊 Parsing {filepath}...\n")
+    print(f"\n\U0001f4ca Parsing {filepath}...\n")
     
     # Read file with proper encoding
     try:
@@ -213,20 +212,20 @@ def generate_html_report(filepath, hostname, scan_type):
         with open(filepath, 'rb') as f:
             raw_content = f.read().decode('utf-8', errors='ignore')
     
-    print("🔍 Detecting sections...")
+    print("\U0001f50d Detecting sections...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
     
-    print("\n📁 Organizing into categories...")
+    print("\n\U0001f4c1 Organizing into categories...")
     categories = categorize_sections(sections)
     for cat_name, cat_sections in categories.items():
         print(f"  {cat_name}: {len(cat_sections)} sections")
     
-    print("\n⚠️  Extracting critical findings...")
+    print("\n\u26a0\ufe0f  Extracting critical findings...")
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    print("\n💻 Generating terminal view...")
-    terminal_html = convert_ansi_to_html_colors(raw_content)
+    print("\n\U0001f4bb Generating views...")
+    terminal_html = convert_ansi_to_html_colors(raw_content, for_terminal=True)
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -235,18 +234,18 @@ def generate_html_report(filepath, hostname, scan_type):
     section_idx = 0
     for cat_name, cat_sections in categories.items():
         cat_id = cat_name.replace(' ', '_').replace('/', '_')
-        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{cat_id}\')">▶ {escape(cat_name)} ({len(cat_sections)})</div>'
+        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{cat_id}\")">▶ {escape(cat_name)} ({len(cat_sections)})</div>'
         toc_html += f'<ul class="cat-sections" id="cat-{cat_id}">'
         for section_title in cat_sections:
             toc_html += f'<li><a href="#s{section_idx}" onclick="jump({section_idx}); return false;">{escape(section_title[:70])}</a></li>'
             section_idx += 1
         toc_html += '</ul></li>'
     
-    # Generate sections
+    # Generate sections WITH COLORS (use ANSI-to-HTML conversion)
     secs = ''.join([
         f'<div class="sec" id="s{i}">'
-        f'<div class="st" onclick="tog(this)">▶ {escape(t)}</div>'
-        f'<div class="sc">{escape(strip_ansi_codes(c))}</div>'
+        f'<div class="st" onclick="tog(this)">\u25b6 {escape(t)}</div>'
+        f'<div class="sc">{convert_ansi_to_html_colors(c, for_terminal=False)}</div>'
         f'</div>'
         for i, (t, c) in enumerate(sections.items())
     ])
@@ -265,14 +264,14 @@ function sw(v) {
 function tog(e) {
     let c = e.nextElementSibling;
     c.style.display = c.style.display === 'none' ? 'block' : 'none';
-    e.innerHTML = c.style.display === 'none' ? '▶ ' + e.innerHTML.slice(2) : '▼ ' + e.innerHTML.slice(2);
+    e.innerHTML = c.style.display === 'none' ? '\u25b6 ' + e.innerHTML.slice(2) : '\u25bc ' + e.innerHTML.slice(2);
 }
 
 function toggleCat(id) {
     let cat = document.getElementById('cat-' + id);
     let title = event.target;
     cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
-    title.innerHTML = cat.style.display === 'none' ? '▶ ' + title.innerHTML.slice(2) : '▼ ' + title.innerHTML.slice(2);
+    title.innerHTML = cat.style.display === 'none' ? '\u25b6 ' + title.innerHTML.slice(2) : '\u25bc ' + title.innerHTML.slice(2);
 }
 
 function jump(i) {
@@ -292,7 +291,7 @@ document.getElementById('sb').addEventListener('input', e => {
 </script>
     """
     
-    # HTML template
+    # HTML template with FIXED TERMINAL COLORS
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -329,23 +328,23 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sec{{background:#1a1a2e;padding:20px;margin-bottom:20px;border-radius:10px;border:1px solid #333;scroll-margin-top:20px}}
 .st{{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}}
 .st:hover{{background:rgba(0,255,0,0.2)}}
-.sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.5;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto;display:none;color:#e0e0e0}}
-.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;font:12px 'Courier New',monospace;line-height:1.6;max-height:80vh;overflow-y:auto;color:#c9d1d9}}
-.term-header{{background:rgba(80,250,123,0.08);padding:6px 10px;margin:8px 0;border-left:3px solid #50fa7b;border-radius:3px}}
+.sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto;display:none}}
+.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;font:12px 'Courier New',monospace;line-height:1.6;max-height:80vh;overflow-y:auto}}
+.term-header{{background:rgba(80,250,123,0.08);padding:4px 8px;margin:6px 0;border-left:3px solid #50fa7b;border-radius:3px}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 </style></head><body>
-<div class="hdr"><h1>🥒 ParsingPeas Report</h1>
+<div class="hdr"><h1>\U0001f95a ParsingPeas Report</h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
-<div><button class="vb active" onclick="sw(0)">📊 Parsed</button><button class="vb" onclick="sw(1)">💻 Terminal</button></div>
+<div><button class="vb active" onclick="sw(0)">\U0001f4ca Parsed</button><button class="vb" onclick="sw(1)">\U0001f4bb Terminal</button></div>
 <div id="p" class="vc active">
-<div class="toc"><h2>📋 Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
-<input type="text" class="sb" id="sb" placeholder="🔍 Search..."/>
-<div class="hl"><h2>⚠️ Critical Findings ({len(findings)})</h2>{finds}</div>
+<div class="toc"><h2>\U0001f4cb Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
+<input type="text" class="sb" id="sb" placeholder="\U0001f50d Search..."/>
+<div class="hl"><h2>\u26a0\ufe0f Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="🔍 Search raw..."/><div class="raw">{terminal_html}</div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="\U0001f50d Search raw..."/><div class="raw">{terminal_html}</div></div>
 {javascript}
 </body></html>'''
     
@@ -356,7 +355,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
     with open(report_path, 'w', encoding='utf-8', errors='xmlcharrefreplace') as f:
         f.write(html)
     
-    print(f"\n✅ Report generated: {report_path}\n")
+    print(f"\n\u2705 Report generated: {report_path}\n")
     return report_path
 
 
