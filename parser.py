@@ -20,16 +20,26 @@ from collections import OrderedDict
 CHUNK_SIZE = 2000  # Lines per chunk for terminal view loading
 
 # Critical finding keywords for intelligent detection
+# ONLY include high-confidence PE vectors here
 CRITICAL_KEYWORDS = [
-    'cap_', 'CAP_',  # Linux capabilities
-    'PEASS',  # LinPEAS markers
-    '95%', '99%',  # High confidence
-    'PE vector',
-    'RED/YELLOW', 'RED:',
-    'writable', 'WRITABLE',
-    'password', 'PASSWORD',
-    'root owned',
-    'possible CVE'
+    # High confidence markers
+    'PEASS', '95%', '99%', 'PE vector', 'RED/YELLOW', 'RED:',
+    'possible CVE', 'Exploit',
+    
+    # Specific Dangerous Capabilities (Root equivalents)
+    'cap_dac_override', 
+    'cap_sys_admin', 
+    'cap_sys_ptrace', 
+    'cap_sys_module',
+    'cap_chown',
+    'cap_fowner',
+    'cap_setuid',
+    'cap_setgid',
+    
+    # Specific Critical Configurations
+    'nopasswd', 'NOPASSWD',  # Sudo without password
+    'git config', # Often contains creds
+    'id_rsa', # Private keys
 ]
 
 class AnsiConverter:
