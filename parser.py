@@ -6,7 +6,7 @@ Parses linpeas/winpeas output and generates interactive HTML reports
 
 import os
 import re
-import base64
+import json
 from datetime import datetime
 from html import escape
 from collections import OrderedDict
@@ -236,18 +236,34 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    # Save raw terminal data to separate file - STRIP ANSI CODES IN PYTHON
+    # Process terminal data: strip ANSI and chunk it
     timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
     os.makedirs('reports', exist_ok=True)
     
-    print("\n💾 Processing terminal data (stripping ANSI codes)...")
+    print("\n💾 Processing terminal data (chunked lazy loading)...")
     clean_terminal = strip_ansi_codes(raw_content)
-    raw_filename = f"terminal_{hostname}_{timestamp_str}.txt"
-    raw_path = os.path.join('reports', raw_filename)
-    with open(raw_path, 'w', encoding='utf-8', errors='ignore') as f:
-        f.write(clean_terminal)
-    print(f"  Terminal data: {raw_filename}")
-    print(f"  Original: {len(raw_content)} bytes -> Clean: {len(clean_terminal)} bytes")
+    lines = clean_terminal.split('\n')
+    total_lines = len(lines)
+    
+    # Create chunks of 500 lines each
+    chunk_size = 500
+    chunks = []
+    for i in range(0, total_lines, chunk_size):
+        chunk_lines = lines[i:i+chunk_size]
+        chunks.append('\n'.join(chunk_lines))
+    
+    # Save chunks as JSON
+    chunks_filename = f"terminal_{hostname}_{timestamp_str}.json"
+    chunks_path = os.path.join('reports', chunks_filename)
+    with open(chunks_path, 'w', encoding='utf-8') as f:
+        json.dump({
+            'total_lines': total_lines,
+            'chunk_size': chunk_size,
+            'chunks': chunks
+        }, f)
+    
+    print(f"  Terminal data: {chunks_filename}")
+    print(f"  Total lines: {total_lines:,} | Chunks: {len(chunks)} | Size: {len(clean_terminal):,} bytes")
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -275,37 +291,111 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript - Just fetch and display, NO processing needed!
+    # JavaScript - Production-grade chunked loader
     javascript = f'''
 <script>
-const TERMINAL_DATA_FILE = '{raw_filename}';
-let terminalLoaded = false;
+const TERMINAL_DATA_FILE = '{chunks_filename}';
+let terminalData = null;
+let currentChunk = 0;
+let isLoading = false;
+let allLoaded = false;
 
 function sw(v) {{
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
     document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
     
-    if (v === 1 && !terminalLoaded) {{
-        console.log('Loading terminal view...');
-        const pre = document.getElementById('terminal-pre');
-        pre.textContent = 'Loading...';
-        
-        fetch(TERMINAL_DATA_FILE)
-            .then(r => {{
-                if (!r.ok) throw new Error('Failed to load: ' + r.status);
-                return r.text();
-            }})
-            .then(data => {{
-                console.log('Loaded', data.length, 'bytes');
-                pre.textContent = data;
-                terminalLoaded = true;
-                console.log('Terminal ready!');
-            }})
-            .catch(e => {{
-                pre.textContent = 'Error: ' + e.message + '\\n\\nMake sure to open this file via http:// (not file:///)\\nRun: python3 -m http.server 8000';
-                console.error(e);
-            }});
+    if (v === 1 && !terminalData) {{
+        loadTerminalData();
     }}
+}}
+
+async function loadTerminalData() {{
+    const pre = document.getElementById('terminal-pre');
+    const status = document.getElementById('term-status');
+    const loadBtn = document.getElementById('load-all-btn');
+    
+    try {{
+        status.textContent = 'Loading terminal data...';
+        const response = await fetch(TERMINAL_DATA_FILE);
+        if (!response.ok) throw new Error('Failed to load: ' + response.status);
+        
+        terminalData = await response.json();
+        console.log(`Loaded ${{terminalData.chunks.length}} chunks (${{terminalData.total_lines.toLocaleString()}} lines)`);
+        
+        // Render first chunk immediately
+        pre.textContent = terminalData.chunks[0];
+        currentChunk = 1;
+        
+        status.textContent = `Showing 1-${{Math.min(terminalData.chunk_size, terminalData.total_lines)}} of ${{terminalData.total_lines.toLocaleString()}} lines`;
+        loadBtn.style.display = terminalData.chunks.length > 1 ? 'inline-block' : 'none';
+        
+        // Setup scroll observer
+        setupScrollObserver();
+    }} catch(e) {{
+        status.textContent = 'Error: ' + e.message;
+        pre.textContent = 'Failed to load terminal data.\n\nMake sure to open via http:// (not file:///)\nRun: python3 -m http.server 8000';
+        console.error(e);
+    }}
+}}
+
+function setupScrollObserver() {{
+    const container = document.getElementById('terminal-content');
+    const pre = document.getElementById('terminal-pre');
+    
+    container.addEventListener('scroll', () => {{
+        if (allLoaded || isLoading) return;
+        
+        const scrollPercent = (container.scrollTop + container.clientHeight) / container.scrollHeight;
+        if (scrollPercent > 0.8) {{
+            loadNextChunk();
+        }}
+    }});
+}}
+
+function loadNextChunk() {{
+    if (!terminalData || currentChunk >= terminalData.chunks.length || isLoading) return;
+    
+    isLoading = true;
+    const pre = document.getElementById('terminal-pre');
+    const status = document.getElementById('term-status');
+    
+    // Append next chunk
+    pre.textContent += '\n' + terminalData.chunks[currentChunk];
+    currentChunk++;
+    
+    const linesShown = Math.min(currentChunk * terminalData.chunk_size, terminalData.total_lines);
+    status.textContent = `Showing 1-${{linesShown.toLocaleString()}} of ${{terminalData.total_lines.toLocaleString()}} lines`;
+    
+    if (currentChunk >= terminalData.chunks.length) {{
+        allLoaded = true;
+        document.getElementById('load-all-btn').style.display = 'none';
+        status.textContent = `All ${{terminalData.total_lines.toLocaleString()}} lines loaded`;
+    }}
+    
+    isLoading = false;
+}}
+
+function loadAllChunks() {{
+    if (!terminalData || allLoaded) return;
+    
+    const pre = document.getElementById('terminal-pre');
+    const status = document.getElementById('term-status');
+    const btn = document.getElementById('load-all-btn');
+    
+    btn.textContent = 'Loading...';
+    btn.disabled = true;
+    
+    // Load remaining chunks
+    setTimeout(() => {{
+        const remaining = terminalData.chunks.slice(currentChunk);
+        pre.textContent += '\n' + remaining.join('\n');
+        
+        currentChunk = terminalData.chunks.length;
+        allLoaded = true;
+        
+        status.textContent = `All ${{terminalData.total_lines.toLocaleString()}} lines loaded`;
+        btn.style.display = 'none';
+    }}, 10);
 }}
 
 function tog(e) {{
@@ -332,11 +422,11 @@ document.getElementById('sb').addEventListener('input', e => {{
     }});
 }});
 
-console.log('ParsingPeas v2.0 loaded!');
+console.log('ParsingPeas Pro v2.0 loaded!');
 </script>
     '''
     
-    # HTML template
+    # HTML template with chunked terminal UI
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -374,8 +464,13 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .st{{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}}
 .st:hover{{background:rgba(0,255,0,0.2)}}
 .sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto}}
-.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;max-height:80vh;overflow-y:auto}}
+.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;max-height:80vh;overflow-y:auto;position:relative}}
 #terminal-pre{{color:#50fa7b;margin:0;white-space:pre-wrap;word-wrap:break-word;font:12px 'Courier New',monospace;line-height:1.6}}
+.term-controls{{background:rgba(0,255,0,0.05);padding:12px;margin-bottom:15px;border-radius:5px;display:flex;align-items:center;justify-content:space-between;border:1px solid rgba(0,255,0,0.2)}}
+#term-status{{color:#50fa7b;font-size:13px}}
+#load-all-btn{{background:#00ff00;color:#0a0e27;border:none;padding:8px 16px;border-radius:4px;font:12px 'Courier New',monospace;font-weight:bold;cursor:pointer;transition:all .2s}}
+#load-all-btn:hover{{background:#00cc00;transform:scale(1.05)}}
+#load-all-btn:disabled{{opacity:0.5;cursor:not-allowed}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
@@ -389,7 +484,13 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 <div class="hl"><h2>Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><pre id="terminal-pre">Click Terminal button to load...</pre></div></div>
+<div id="r" class="vc">
+<div class="term-controls">
+<span id="term-status">Click Terminal button to load...</span>
+<button id="load-all-btn" onclick="loadAllChunks()" style="display:none">Load All</button>
+</div>
+<div class="raw" id="terminal-content"><pre id="terminal-pre"></pre></div>
+</div>
 {javascript}
 </body></html>'''
     
@@ -400,7 +501,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
         f.write(html)
     
     print(f"\n✅ Report generated: {report_path}")
-    print(f"✅ Terminal data: {raw_path}\n")
+    print(f"✅ Terminal data: {chunks_path}\n")
     return report_path
 
 
