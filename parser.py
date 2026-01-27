@@ -19,13 +19,20 @@ from collections import OrderedDict
 # --- Configuration ---
 CHUNK_SIZE = 2000  # Lines per chunk for terminal view loading
 
+
 class AnsiConverter:
     """
     Handles conversion of ANSI codes to HTML for report viewing.
     Uses a state-machine approach to ensure flat, valid HTML spans.
+
+    IMPORTANT:
+    We must keep the original LinPEAS/WinPEAS coloring semantics.
+    In particular, we should distinguish plain red text ("RED") from red/yellow
+    combinations ("RED/YELLOW") by inspecting the actual ANSI SGR codes.
     """
 
     # Updated to standard terminal colors for better readability
+    # (Foreground only; background handled separately.)
     COLORS = {
         '30': '#000000', '31': '#cc0000', '32': '#4e9a06', '33': '#c4a000',
         '34': '#3465a4', '35': '#75507b', '36': '#06989a', '37': '#d3d7cf',
@@ -33,39 +40,65 @@ class AnsiConverter:
         '94': '#729fcf', '95': '#ad7fa8', '96': '#34e2e2', '97': '#eeeeec',
     }
 
+    # Background color mapping for the combinations LinPEAS commonly uses.
+    # 41/101 => red bg, 43/103 => yellow bg.
+    BG_COLORS = {
+        '41': '#ff0000',
+        '101': '#ff0000',
+        '43': '#ffff00',
+        '103': '#ffff00',
+    }
+
+    FG_RED = {'31', '91'}
+    FG_YELLOW = {'33', '93'}
+    FG_WHITE = {'37', '97'}
+    BG_RED = {'41', '101'}
+    BG_YELLOW = {'43', '103'}
+
     def to_html(self, text):
         parts = re.split(r'\x1b\[([\d;]*)m', text)
         result = []
-        current_style = {'color': None, 'bold': False, 'bg': None}
+        current_style = {'fg_code': None, 'bg_code': None, 'bold': False}
 
-        def get_span_tag(text_content, style):
+        def is_critical_combo(style):
+            """Detect LinPEAS "RED/YELLOW" style combos."""
+            fg = style.get('fg_code')
+            bg = style.get('bg_code')
+
+            # Red text on Yellow background (common LinPEAS RED/YELLOW)
+            if bg in self.BG_YELLOW and fg in self.FG_RED:
+                return True
+
+            # Yellow/White text on Red background (also used by LinPEAS for criticals)
+            if bg in self.BG_RED and (fg in self.FG_YELLOW or fg in self.FG_WHITE):
+                return True
+
+            return False
+
+        def get_span_tag(style):
             css = []
             classes = []
 
-            # CRITICAL FIX: Only treat as "Critical" if the ANSI background is RED
-            # This respects LinPEAS's native coloring (Red/Yellow = Critical).
-            is_critical = False
+            fg_hex = self.COLORS.get(style['fg_code']) if style.get('fg_code') else None
+            bg_hex = self.BG_COLORS.get(style['bg_code']) if style.get('bg_code') else None
 
-            # Pattern 1: Red background = Critical (LinPEAS Standard)
-            if style['bg'] == '#ff0000':
-                is_critical = True
-
-            # Apply critical styling
-            if is_critical:
-                classes.append('crit-bg')
-                css.append("color:#ffff00")
-                css.append("background-color:#ff0000")
+            if fg_hex:
+                css.append(f"color:{fg_hex}")
+            if style.get('bold'):
                 css.append("font-weight:bold")
-            else:
-                # Normal processing for non-critical text
-                if style['color']:
-                    css.append(f"color:{style['color']}")
-                if style['bold']:
-                    css.append("font-weight:bold")
-                if style['bg']:
-                    css.append(f"background-color:{style['bg']}")
+            if bg_hex:
+                css.append(f"background-color:{bg_hex}")
 
-            if not css and not classes: return ""
+            # Add a class for combo-critical so it can be visually distinct while still
+            # keeping the original fg/bg colors.
+            if is_critical_combo(style):
+                classes.append('crit-combo')
+                # Ensure it pops like the terminal does.
+                if "font-weight:bold" not in css:
+                    css.append("font-weight:bold")
+
+            if not css and not classes:
+                return ""
 
             class_attr = f' class="{" ".join(classes)}"' if classes else ''
             style_attr = f' style="{";".join(css)}"' if css else ''
@@ -76,23 +109,30 @@ class AnsiConverter:
 
         for i in range(1, len(parts), 2):
             code_seq = parts[i]
-            text_segment = parts[i+1]
+            text_segment = parts[i + 1]
             codes = code_seq.split(';')
 
             for code in codes:
-                if not code: code = '0'
-                if code == '0': current_style = {'color': None, 'bold': False, 'bg': None}
-                elif code == '1': current_style['bold'] = True
-                elif code == '22': current_style['bold'] = False
-                elif code in self.COLORS: current_style['color'] = self.COLORS[code]
-                elif code == '39': current_style['color'] = None
-                elif code == '49': current_style['bg'] = None
-                # Handle red background for crits (often 41 or 101)
-                elif code == '41': current_style['bg'] = '#ff0000'
-                elif code == '101': current_style['bg'] = '#ff0000'
+                if not code:
+                    code = '0'
+
+                if code == '0':
+                    current_style = {'fg_code': None, 'bg_code': None, 'bold': False}
+                elif code == '1':
+                    current_style['bold'] = True
+                elif code == '22':
+                    current_style['bold'] = False
+                elif code in self.COLORS:
+                    current_style['fg_code'] = code
+                elif code == '39':
+                    current_style['fg_code'] = None
+                elif code == '49':
+                    current_style['bg_code'] = None
+                elif code in self.BG_COLORS:
+                    current_style['bg_code'] = code
 
             if text_segment:
-                span = get_span_tag(text_segment, current_style)
+                span = get_span_tag(current_style)
                 if span:
                     result.append(f"{span}{html.escape(text_segment)}</span>")
                 else:
@@ -194,6 +234,8 @@ class CategoryManager:
 class PeasParser:
     """Parses Linpeas/Winpeas output."""
 
+    ANSI_SGR_RE = re.compile(r'\x1b\[([\d;]*)m')
+
     def __init__(self, content):
         self.raw_content = content
         self.converter = AnsiConverter()
@@ -214,14 +256,7 @@ class PeasParser:
         self._extract_findings_contextual()
 
     def _strip_initial_banner(self):
-        """Remove the *ASCII art logo* but keep the PEASS credit box.
-
-        LinPEAS usually prints a big ASCII-art logo, then the "Do you like PEASS?"
-        box, and only then the first real section header.
-
-        We want to drop only the logo (it tends to get distorted in HTML), while
-        keeping the credit box intact.
-        """
+        """Remove the *ASCII art logo* but keep the PEASS credit box."""
         lines = self.raw_content.splitlines()
         header_ansi_pattern = '\x1b[1;32m'
 
@@ -238,7 +273,7 @@ class PeasParser:
             j = box_line_idx
             steps = 0
             while j > 0 and steps < 15:
-                prev = lines[j-1]
+                prev = lines[j - 1]
                 if any(ch in prev for ch in '╔╗╚╝║═'):
                     j -= 1
                     steps += 1
@@ -327,6 +362,34 @@ class PeasParser:
             self.section_ids[title] = f"s{idx}"
             idx += 1
 
+    def _has_critical_combo(self, line):
+        """True if the ANSI SGR sequences include a LinPEAS critical color combo."""
+        for seq in self.ANSI_SGR_RE.findall(line):
+            codes = set([c for c in seq.split(';') if c])
+
+            # Red on Yellow background => critical (LinPEAS RED/YELLOW)
+            if (('43' in codes or '103' in codes) and ('31' in codes or '91' in codes)):
+                return True
+
+            # Yellow/White on Red background => critical
+            if (('41' in codes or '101' in codes) and (('33' in codes or '93' in codes) or ('37' in codes or '97' in codes))):
+                return True
+
+        return False
+
+    def _has_red_text_no_critical_bg(self, line):
+        """True if line contains red text, but not in a critical background combo."""
+        for seq in self.ANSI_SGR_RE.findall(line):
+            codes = set([c for c in seq.split(';') if c])
+
+            has_red_fg = ('31' in codes or '91' in codes)
+            has_bg = any(bg in codes for bg in ('41', '101', '43', '103'))
+
+            if has_red_fg and not has_bg:
+                return True
+
+        return False
+
     def _extract_findings_contextual(self):
         self.findings = []
         self.section_findings = {}
@@ -341,22 +404,29 @@ class PeasParser:
                 found = False
                 level = ""
 
-                # Robust Critical/High detection
-                # LinPEAS critical = White(37) on Red(41) => \x1b[1;37;41m
-                # Also common: \x1b[1;31;103m (Red on Yellow)
-                if ';41m' in line or ';103m' in line:
+                # Critical: only when the actual ANSI uses a RED/YELLOW combo.
+                if self._has_critical_combo(line):
                     level = 'critical'
                     found = True
-                elif '1;31m' in line: # Bold Red
+
+                # High: red foreground only (no bg combination)
+                elif self._has_red_text_no_critical_bg(line):
                     clean = self.converter.strip(line).strip()
                     # Enhanced False Positive filtering
-                    if len(clean) > 200: continue # Skip ultra-long lines
-                    if "Scan" in clean or "started" in clean: continue
-                    if "Use the" in clean: continue
-                    if "https://" in clean: continue # URLs often red but not findings
-                    if "Active Internet connections" in clean: continue
-                    if "Proto Recv-Q" in clean: continue
-                    if "Unknown SUID binary" in clean: continue # Often misclassified
+                    if len(clean) > 200:
+                        continue
+                    if "Scan" in clean or "started" in clean:
+                        continue
+                    if "Use the" in clean:
+                        continue
+                    if "https://" in clean:
+                        continue
+                    if "Active Internet connections" in clean:
+                        continue
+                    if "Proto Recv-Q" in clean:
+                        continue
+                    if "Unknown SUID binary" in clean:
+                        continue
 
                     level = 'high'
                     found = True
@@ -364,7 +434,6 @@ class PeasParser:
                 if found:
                     clean_text = self.converter.strip(line).strip()
                     if clean_text:
-                        # De-duplication using hash of text
                         text_hash = hashlib.md5(clean_text.encode()).hexdigest()
                         if text_hash not in self.seen_findings:
                             finding_obj = {
@@ -402,7 +471,7 @@ class ReportGenerator:
     def _save_terminal_data(self, filename):
         lines = self.parser.raw_content.splitlines()
         converted_lines = [self.parser.converter.to_html(line) for line in lines]
-        chunks = ['\n'.join(converted_lines[i:i+CHUNK_SIZE]) for i in range(0, len(converted_lines), CHUNK_SIZE)]
+        chunks = ['\n'.join(converted_lines[i:i + CHUNK_SIZE]) for i in range(0, len(converted_lines), CHUNK_SIZE)]
 
         data = {
             "meta": {
@@ -426,7 +495,7 @@ class ReportGenerator:
             if not sections:
                 continue
 
-            # FIX: Calculate stats for this category - count SECTIONS not individual findings
+            # Calculate stats for this category - count SECTIONS not individual findings
             sections_with_crit = 0
             sections_with_high = 0
             for title in sections.keys():
@@ -437,14 +506,16 @@ class ReportGenerator:
 
                     if has_critical:
                         sections_with_crit += 1
-                    elif has_high:  # Only count as 'high' if no critical
+                    elif has_high:
                         sections_with_high += 1
 
             stats_badge = ""
             if sections_with_crit > 0 or sections_with_high > 0:
                 parts = []
-                if sections_with_crit > 0: parts.append(f"<span class='stat-crit'>{sections_with_crit}C</span>")
-                if sections_with_high > 0: parts.append(f"<span class='stat-high'>{sections_with_high}H</span>")
+                if sections_with_crit > 0:
+                    parts.append(f"<span class='stat-crit'>{sections_with_crit}C</span>")
+                if sections_with_high > 0:
+                    parts.append(f"<span class='stat-high'>{sections_with_high}H</span>")
                 stats_badge = f"<span class='cat-stats'>{' '.join(parts)}</span>"
 
             toc_html.append(f'''
@@ -567,8 +638,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
         pre.content {{ white-space: pre; overflow-x: auto; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
 
-        /* Critical background styling - keep it "cell aligned" (no padding/radius) so ASCII art doesn't break */
-        .crit-bg {{ color: #ffff00 !important; background-color: #ff0000 !important; font-weight: bold !important; padding: 0 !important; border-radius: 0 !important; }}
+        /* Combo-critical (RED/YELLOW etc) – keep original colors but make it pop. */
+        .crit-combo {{ font-weight: bold !important; }}
 
         #terminal-view {{ background: #000; padding: 20px; }}
         #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; line-height: 1.15; white-space: pre; overflow-x: auto; }}
@@ -620,16 +691,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const btns = document.querySelectorAll('.tabs button');
             if (viewName === 'report') btns[0].classList.add('active'); else btns[1].classList.add('active');
             if (viewName === 'terminal' && !terminalLoaded) {{ loadTerminal(); }}
-        }}
-        function scrollToSection(id) {{
-            if (!id) return;
-            const el = document.getElementById(id);
-            if (el) {{
-                el.scrollIntoView({{behavior: 'smooth', block: 'start'}});
-                el.style.transition = 'background 0.5s';
-                el.style.background = 'rgba(0, 255, 0, 0.1)';
-                setTimeout(() => el.style.background = '', 1000);
-            }}
         }}
         async function loadTerminal() {{
             const loader = document.getElementById('loading');
