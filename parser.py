@@ -11,6 +11,7 @@ import re
 import json
 import html
 import argparse
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from collections import OrderedDict
@@ -177,6 +178,7 @@ class PeasParser:
         self.section_findings = {}
         self.hostname = "unknown"
         self.section_ids = {}
+        self.seen_findings = set()
 
     def parse(self):
         self._extract_hostname()
@@ -246,6 +248,7 @@ class PeasParser:
     def _extract_findings_contextual(self):
         self.findings = []
         self.section_findings = {}
+        self.seen_findings = set()
 
         for title, content in self.sections.items():
             lines = content.splitlines()
@@ -256,26 +259,34 @@ class PeasParser:
                 found = False
                 level = ""
 
-                if '1;37;41m' in line or '1;31;103m' in line or ';41m' in line:
+                # Robust Critical/High detection
+                # LinPEAS critical = White(37) on Red(41) => \x1b[1;37;41m
+                # Also common: \x1b[1;31;103m (Red on Yellow)
+                if ';41m' in line or ';103m' in line:
                     level = 'critical'
                     found = True
-                elif '1;31m' in line:
+                elif '1;31m' in line: # Bold Red
                     clean = self.converter.strip(line).strip()
-                    if "Scan" not in clean and "started" not in clean and len(clean) < 300:
+                    # Filter common false positives
+                    if "Scan" not in clean and "started" not in clean and len(clean) < 300 and "Use the" not in clean:
                         level = 'high'
                         found = True
 
                 if found:
                     clean_text = self.converter.strip(line).strip()
                     if clean_text:
-                        finding_obj = {
-                            'level': level,
-                            'text': clean_text,
-                            'section': title,
-                            'section_id': sec_id
-                        }
-                        self.findings.append(finding_obj)
-                        current_section_findings.append(finding_obj)
+                        # De-duplication using hash of text
+                        text_hash = hashlib.md5(clean_text.encode()).hexdigest()
+                        if text_hash not in self.seen_findings:
+                            finding_obj = {
+                                'level': level,
+                                'text': clean_text,
+                                'section': title,
+                                'section_id': sec_id
+                            }
+                            self.findings.append(finding_obj)
+                            current_section_findings.append(finding_obj)
+                            self.seen_findings.add(text_hash)
 
             if current_section_findings:
                 self.section_findings[title] = current_section_findings
