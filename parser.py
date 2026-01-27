@@ -237,7 +237,6 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     print(f"  Found {len(findings)} critical findings")
     
     print("\n\U0001f4be Encoding terminal data (base64)...")
-    # Encode raw content as base64 - NO ESCAPING ISSUES!
     raw_base64 = base64.b64encode(raw_content.encode('utf-8')).decode('ascii')
     print(f"  Encoded size: {len(raw_base64)} bytes")
     
@@ -255,10 +254,10 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
             section_idx += 1
         toc_html += '</ul></li>'
     
-    # Generate sections WITH COLORS
+    # Generate sections - VISIBLE BY DEFAULT
     secs = ''.join([
         f'<div class="sec" id="s{i}">'
-        f'<div class="st" onclick="tog(this)">&gt; {escape(t)}</div>'
+        f'<div class="st" onclick="tog(this)">v {escape(t)}</div>'
         f'<div class="sc">{convert_ansi_to_html_colors(c, for_terminal=False)}</div>'
         f'</div>'
         for i, (t, c) in enumerate(sections.items())
@@ -267,44 +266,42 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript with base64 decoding
-    javascript = f'''
+    # JavaScript - reads from textarea
+    javascript = '''
 <script>
 let terminalLoaded = false;
-const rawDataBase64 = "{raw_base64}";
 
-function sw(v) {{
+function sw(v) {
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
     document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
     
-    if (v === 1 && !terminalLoaded) {{
+    if (v === 1 && !terminalLoaded) {
         console.log('Loading terminal view...');
         const terminal = document.getElementById('terminal-content');
         terminal.innerHTML = '<p style="color:#f1fa8c;padding:20px">Processing terminal view...</p>';
         
-        setTimeout(() => {{
-            try {{
-                // Decode base64
+        setTimeout(() => {
+            try {
+                const rawDataBase64 = document.getElementById('raw-data').value;
                 const rawData = atob(rawDataBase64);
                 terminal.innerHTML = convertAnsiToHtml(rawData);
                 terminalLoaded = true;
                 console.log('Terminal loaded!');
-            }} catch(e) {{
+            } catch(e) {
                 terminal.innerHTML = '<p style="color:#ff6b6b;padding:20px">Error loading terminal: ' + e.message + '</p>';
                 console.error('Terminal load error:', e);
-            }}
-        }}, 100);
-    }}
-}}
+            }
+        }, 100);
+    }
+}
 
-function convertAnsiToHtml(text) {{
+function convertAnsiToHtml(text) {
     const lines = text.split('\n');
     const result = [];
     
-    for (let line of lines) {{
+    for (let line of lines) {
         let processed = line;
         
-        // ANSI color mapping
         processed = processed.replace(/\x1B\[1;31m/g, '<span style="color:#ff6b6b;font-weight:bold">');
         processed = processed.replace(/\x1B\[1;32m/g, '<span style="color:#50fa7b;font-weight:bold">');
         processed = processed.replace(/\x1B\[1;33m/g, '<span style="color:#f1fa8c;font-weight:bold">');
@@ -322,51 +319,51 @@ function convertAnsiToHtml(text) {{
         processed = processed.replace(/\x1B\[m/g, '</span>');
         processed = processed.replace(/\x1B\[[0-9;]*m/g, '');
         
-        // Escape HTML
         processed = processed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         processed = processed.replace(/&lt;span/g, '<span').replace(/&lt;\\/span&gt;/g, '</span>');
         processed = processed.replace(/style=&quot;([^&]+?)&quot;&gt;/g, 'style="$1">');
         
         result.push(processed + '<br>');
-    }}
+    }
     
     return result.join('\n');
-}}
+}
 
-function tog(e) {{
+function tog(e) {
     let c = e.nextElementSibling;
     c.style.display = c.style.display === 'none' ? 'block' : 'none';
-    e.innerHTML = c.style.display === 'none' ? '&gt; ' + e.innerHTML.slice(5) : 'v ' + e.innerHTML.slice(5);
-}}
+    if (c.style.display === 'none') {
+        e.innerHTML = '&gt; ' + e.innerHTML.slice(2);
+    } else {
+        e.innerHTML = 'v ' + e.innerHTML.slice(2);
+    }
+}
 
-function toggleCat(id) {{
+function toggleCat(id) {
     let cat = document.getElementById('cat-' + id);
     let title = event.target;
     cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
     let txt = title.textContent;
     title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + txt.substring(2);
-}}
+}
 
-function jump(i) {{
+function jump(i) {
     let s = document.getElementById('s' + i);
-    s.scrollIntoView({{behavior: 'smooth'}});
-    let t = s.querySelector('.st');
-    let c = s.querySelector('.sc');
-    if (c.style.display === 'none') tog(t);
-}}
+    s.scrollIntoView({behavior: 'smooth'});
+}
 
-document.getElementById('sb').addEventListener('input', e => {{
+document.getElementById('sb').addEventListener('input', e => {
     let q = e.target.value.toLowerCase();
-    document.querySelectorAll('.sec').forEach(s => {{
+    document.querySelectorAll('.sec').forEach(s => {
         s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
-    }});
-}});
+    });
+});
 
-console.log('ParsingPeas loaded! Click Terminal tab to view raw output.');
+console.log('ParsingPeas loaded!');
 </script>
     '''
     
-    # HTML template
+    # HTML template with textarea for base64 storage
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -403,13 +400,15 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sec{{background:#1a1a2e;padding:20px;margin-bottom:20px;border-radius:10px;border:1px solid #333;scroll-margin-top:20px}}
 .st{{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}}
 .st:hover{{background:rgba(0,255,0,0.2)}}
-.sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto;display:none}}
+.sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto}}
 .raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;font:12px 'Courier New',monospace;line-height:1.6;max-height:80vh;overflow-y:auto}}
 .term-header{{background:rgba(80,250,123,0.08);padding:4px 8px;margin:6px 0;border-left:3px solid #50fa7b;border-radius:3px}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
+#raw-data{{display:none}}
 </style></head><body>
+<textarea id="raw-data">{escape(raw_base64)}</textarea>
 <div class="hdr"><h1>ParsingPeas Report</h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
 <div><button class="vb active" onclick="sw(0)">Parsed</button><button class="vb" onclick="sw(1)">Terminal</button></div>
