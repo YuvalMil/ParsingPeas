@@ -10,8 +10,18 @@ from datetime import datetime
 from html import escape
 
 
+def strip_ansi_codes(text):
+    """Remove ANSI color codes from text"""
+    # Pattern to match ANSI escape sequences
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
+
+
 def parse_linpeas(content):
     """Parse linpeas output and extract key sections"""
+    # Strip ANSI codes first
+    content = strip_ansi_codes(content)
+    
     sections = {}
     current_section = "General"
     current_content = []
@@ -47,6 +57,9 @@ def parse_linpeas(content):
 
 def extract_highlights(content):
     """Extract critical findings from output"""
+    # Strip ANSI codes first
+    content = strip_ansi_codes(content)
+    
     highlights = []
     
     # Patterns for important findings
