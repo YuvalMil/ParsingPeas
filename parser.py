@@ -404,7 +404,7 @@ async function loadTerminalData() {{
         debugLog('Rendering first chunk');
         debugLog('First chunk length', terminalData.chunks[0].length);
         debugLog('First 100 chars', terminalData.chunks[0].substring(0, 100));
-        pre.textContent = terminalData.chunks[0];
+        pre.innerText = terminalData.chunks[0];
         debugLog('Pre element textContent length after assignment', pre.textContent.length);
         currentChunk = 1;
         
@@ -442,7 +442,7 @@ function loadNextChunk() {{
     const pre = document.getElementById('terminal-pre');
     const status = document.getElementById('term-status');
     
-    pre.textContent += '\\n' + terminalData.chunks[currentChunk];
+    pre.innerText += '\\n' + terminalData.chunks[currentChunk];
     currentChunk++;
     
     const linesShown = Math.min(currentChunk * terminalData.chunk_size, terminalData.total_lines);
@@ -470,7 +470,7 @@ function loadAllChunks() {{
     
     setTimeout(() => {{
         const remaining = terminalData.chunks.slice(currentChunk);
-        pre.textContent += '\\n' + remaining.join('\\n');
+        pre.innerText += '\\n' + remaining.join('\\n');
         
         currentChunk = terminalData.chunks.length;
         allLoaded = true;
