@@ -19,34 +19,33 @@ def strip_ansi_codes(text):
 def convert_ansi_to_html_colors(text):
     """
     Convert ANSI codes to colored HTML for terminal view
-    Using brighter, more visible colors
     """
     lines = text.split('\n')
     result_lines = []
     
     for line in lines:
-        # Check if this is a header line (has cyan color code)
-        is_header = '\x1B[1;36m' in line or '\x1B[36m' in line
+        # Check if this is a header line (has BOLD GREEN color code 1;32m)
+        is_header = '\x1B[1;32m' in line
         has_box = bool(re.search(r'[╔╗║╚╝═]', line))
         
         # Process the line for colors
         processed = line
         
-        # Map ANSI codes to HTML colors - BRIGHTER for visibility
+        # Map ANSI codes to HTML colors
         color_map = [
-            (r'\x1B\[1;31m', '<span style="color:#ff6b6b;font-weight:bold">'),  # Bright Red
-            (r'\x1B\[1;32m', '<span style="color:#50fa7b;font-weight:bold">'),  # Bright Green  
-            (r'\x1B\[1;33m', '<span style="color:#ffff00;font-weight:bold">'),  # Bright Yellow
-            (r'\x1B\[1;34m', '<span style="color:#64b5f6;font-weight:bold">'),  # Bright Blue
-            (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),  # Bright Magenta
-            (r'\x1B\[1;36m', '<span style="color:#00ff00;font-weight:bold">'),  # BRIGHT GREEN (was cyan - now visible!)
+            (r'\x1B\[1;31m', '<span style="color:#ff6b6b;font-weight:bold">'),  # Bold Red
+            (r'\x1B\[1;32m', '<span style="color:#00ff00;font-weight:bold">'),  # Bold Green (HEADERS!)
+            (r'\x1B\[1;33m', '<span style="color:#ffff00;font-weight:bold">'),  # Bold Yellow
+            (r'\x1B\[1;34m', '<span style="color:#64b5f6;font-weight:bold">'),  # Bold Blue
+            (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),  # Bold Magenta
+            (r'\x1B\[1;36m', '<span style="color:#00ffff;font-weight:bold">'),  # Bold Cyan
             (r'\x1B\[31m', '<span style="color:#ff5555">'),
-            (r'\x1B\[32m', '<span style="color:#50fa7b">'),
+            (r'\x1B\[32m', '<span style="color:#50fa7b">'),  # Regular green
             (r'\x1B\[33m', '<span style="color:#f1fa8c">'),
             (r'\x1B\[34m', '<span style="color:#64b5f6">'),
             (r'\x1B\[35m', '<span style="color:#ff79c6">'),
-            (r'\x1B\[36m', '<span style="color:#00ff00">'),  # GREEN (was cyan)
-            (r'\x1B\[37m', '<span style="color:#ffffff">'),  # White
+            (r'\x1B\[36m', '<span style="color:#00ffff">'),
+            (r'\x1B\[37m', '<span style="color:#ffffff">'),
             (r'\x1B\[1m', '<span style="font-weight:bold">'),
             (r'\x1B\[0m', '</span>'),
             (r'\x1B\[m', '</span>'),
@@ -78,8 +77,8 @@ def convert_ansi_to_html_colors(text):
 
 def parse_linpeas_by_ansi_colors(content):
     """
-    Parse linpeas by detecting EVERY line with cyan color code
-    Each cyan-colored line with box chars = new section
+    Parse linpeas by detecting lines with BOLD GREEN (1;32m) color code
+    This is the actual color linpeas uses for section headers!
     """
     lines = content.split('\n')
     sections = {}
@@ -90,15 +89,14 @@ def parse_linpeas_by_ansi_colors(content):
     header_count = 0
     
     for line in lines:
-        # AGGRESSIVE header detection:
-        # ANY line with cyan color code AND box characters
-        has_cyan = '\x1B[1;36m' in line or '\x1B[36m' in line
+        # CORRECT header detection: Bold GREEN (1;32m) + box characters
+        has_bold_green = '\x1B[1;32m' in line
         has_box = bool(re.search(r'[╔╗║╚╝═]', line))
         
         clean_line = strip_ansi_codes(line).strip()
         
-        # If it has cyan AND box chars, it's a header!
-        if has_cyan and has_box:
+        # If it has BOLD GREEN AND box chars, it's a header!
+        if has_bold_green and has_box:
             # Save previous section
             if current_section and current_content:
                 sections[current_section] = '\n'.join(current_content)
@@ -114,7 +112,7 @@ def parse_linpeas_by_ansi_colors(content):
                 current_section = title
                 current_content = []
                 header_count += 1
-                print(f"  Found header #{header_count}: {title[:50]}")
+                print(f"  Found header #{header_count}: {title[:60]}")
                 continue
         
         # Skip pure decoration lines (just box characters)
@@ -177,7 +175,7 @@ def generate_html_report(filepath, hostname, scan_type):
     with open(filepath, 'r', errors='ignore') as f:
         raw_content = f.read()
     
-    print("Detecting sections...")
+    print("Detecting sections (looking for bold green 1;32m + box chars)...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
     
     print("Extracting critical findings...")
@@ -235,7 +233,7 @@ document.getElementById('sb').addEventListener('input', e => {
 </script>
     """
     
-    # HTML template with brighter colors
+    # HTML template
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
