@@ -19,45 +19,61 @@ def strip_ansi_codes(text):
 def convert_ansi_to_html_colors(text):
     """
     Convert ANSI codes to colored HTML for terminal view
-    This preserves the colored terminal look
+    Also wraps headers in special divs for better visibility
     """
-    result = text
+    lines = text.split('\n')
+    result_lines = []
     
-    # Map ANSI codes to HTML colors
-    color_map = [
-        (r'\x1B\[1;31m', '<span style="color:#ff5555;font-weight:bold">'),  # Bold Red
-        (r'\x1B\[1;32m', '<span style="color:#50fa7b;font-weight:bold">'),  # Bold Green  
-        (r'\x1B\[1;33m', '<span style="color:#f1fa8c;font-weight:bold">'),  # Bold Yellow
-        (r'\x1B\[1;34m', '<span style="color:#8be9fd;font-weight:bold">'),  # Bold Blue
-        (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),  # Bold Magenta
-        (r'\x1B\[1;36m', '<span style="color:#00ffff;font-weight:bold">'),  # Bold Cyan (TEAL - section headers!)
-        (r'\x1B\[31m', '<span style="color:#ff5555">'),
-        (r'\x1B\[32m', '<span style="color:#50fa7b">'),
-        (r'\x1B\[33m', '<span style="color:#f1fa8c">'),
-        (r'\x1B\[34m', '<span style="color:#8be9fd">'),
-        (r'\x1B\[35m', '<span style="color:#ff79c6">'),
-        (r'\x1B\[36m', '<span style="color:#00ffff">'),  # Cyan
-        (r'\x1B\[37m', '<span style="color:#f8f8f2">'),
-        (r'\x1B\[1m', '<span style="font-weight:bold">'),
-        (r'\x1B\[0m', '</span>'),
-        (r'\x1B\[m', '</span>'),
-    ]
+    for line in lines:
+        # Check if this is a header line (has cyan color code)
+        is_header = '\x1B[1;36m' in line
+        has_box = bool(re.search(r'[╔╗║╚╝═]', line))
+        
+        # Process the line for colors
+        processed = line
+        
+        # Map ANSI codes to HTML colors
+        color_map = [
+            (r'\x1B\[1;31m', '<span style="color:#ff5555;font-weight:bold">'),
+            (r'\x1B\[1;32m', '<span style="color:#50fa7b;font-weight:bold">'),
+            (r'\x1B\[1;33m', '<span style="color:#f1fa8c;font-weight:bold">'),
+            (r'\x1B\[1;34m', '<span style="color:#8be9fd;font-weight:bold">'),
+            (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),
+            (r'\x1B\[1;36m', '<span style="color:#00ffff;font-weight:bold">'),  # Cyan headers
+            (r'\x1B\[31m', '<span style="color:#ff5555">'),
+            (r'\x1B\[32m', '<span style="color:#50fa7b">'),
+            (r'\x1B\[33m', '<span style="color:#f1fa8c">'),
+            (r'\x1B\[34m', '<span style="color:#8be9fd">'),
+            (r'\x1B\[35m', '<span style="color:#ff79c6">'),
+            (r'\x1B\[36m', '<span style="color:#00ffff">'),
+            (r'\x1B\[37m', '<span style="color:#f8f8f2">'),
+            (r'\x1B\[1m', '<span style="font-weight:bold">'),
+            (r'\x1B\[0m', '</span>'),
+            (r'\x1B\[m', '</span>'),
+        ]
+        
+        # Apply color conversions
+        for pattern, replacement in color_map:
+            processed = re.sub(pattern, replacement, processed)
+        
+        # Remove remaining ANSI codes
+        processed = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', processed)
+        
+        # Escape HTML but preserve spans
+        processed = processed.replace('&', '&amp;')
+        processed = processed.replace('<', '&lt;').replace('>', '&gt;')
+        processed = processed.replace('&lt;span', '<span').replace('&lt;/span&gt;', '</span>')
+        processed = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\1">', processed)
+        
+        # Wrap headers in special div for highlighting
+        if is_header and has_box:
+            processed = f'<div class="term-header">{processed}</div>'
+        else:
+            processed = f'<div class="term-line">{processed}</div>'
+        
+        result_lines.append(processed)
     
-    # Apply color conversions
-    for pattern, replacement in color_map:
-        result = re.sub(pattern, replacement, result)
-    
-    # Remove any remaining ANSI codes
-    result = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', result)
-    
-    # Escape HTML characters but preserve our span tags
-    result = result.replace('&', '&amp;')
-    result = result.replace('<', '&lt;').replace('>', '&gt;')
-    # Restore span tags
-    result = result.replace('&lt;span', '<span').replace('&lt;/span&gt;', '</span>')
-    result = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\1">', result)
-    
-    return result
+    return '\n'.join(result_lines)
 
 
 def parse_linpeas_by_ansi_colors(content):
@@ -66,18 +82,11 @@ def parse_linpeas_by_ansi_colors(content):
     Linpeas uses:
     - \x1B[1;34m (bold blue) for decorative elements
     - \x1B[1;36m (bold cyan/teal) for section titles
-    
-    This is THE most reliable way to detect headers!
     """
     lines = content.split('\n')
     sections = {}
     current_section = "System Information"
     current_content = []
-    
-    # Pattern to detect section headers:
-    # - Contains bold cyan (the teal color for titles)
-    # - Usually has box-drawing characters
-    # - Is relatively short (< 100 chars when cleaned)
     
     for i, line in enumerate(lines):
         # Check if this line has the teal/cyan color code (section header color)
@@ -87,27 +96,24 @@ def parse_linpeas_by_ansi_colors(content):
         # Clean version for length check
         clean_line = strip_ansi_codes(line).strip()
         
-        # Section header detection:
-        # 1. Has cyan color (linpeas header color)
-        # 2. Has box-drawing characters OR is marked with [+]
-        # 3. Not too long (headers are concise)
+        # Section header detection
         if has_cyan and (has_box_chars or '[+]' in line) and len(clean_line) < 100:
             # Save previous section
             if current_content:
                 sections[current_section] = '\n'.join(current_content)
                 current_content = []
             
-            # Extract section title (remove box characters and clean up)
+            # Extract section title
             title = clean_line
             title = title.replace('╔', '').replace('╗', '').replace('╚', '').replace('╝', '')
             title = title.replace('═', '').replace('║', '')
             title = title.replace('[+]', '').strip()
             
-            if title:  # Only use non-empty titles
+            if title:
                 current_section = title
             continue
         
-        # Alternative: [+] markers (subsections)
+        # [+] markers (subsections)
         if clean_line.startswith('[+]') and len(clean_line) < 100:
             if current_content:
                 sections[current_section] = '\n'.join(current_content)
@@ -136,19 +142,12 @@ def extract_critical_findings(content):
     seen = set()
     
     patterns = [
-        # Linpeas confidence ratings
         (r'RED/YELLOW.*99%', 'critical'),
         (r'RED/YELLOW.*95%', 'critical'),
-        
-        # CVEs
         (r'\[CVE-\d{4}-\d{4,}\]', 'high'),
-        
-        # Privilege escalation
         (r'NOPASSWD', 'high'),
         (r'\(ALL\s*:\s*ALL\)', 'high'),
         (r'password.*found', 'high'),
-        
-        # Critical writable files
         (r'writable.*/etc/(passwd|shadow)', 'critical'),
         (r'writable.*\.service', 'medium'),
         (r'writable.*cron', 'medium'),
@@ -157,13 +156,11 @@ def extract_critical_findings(content):
     for line in clean.split('\n'):
         line = line.strip()
         
-        # Skip short, empty, or decoration lines
         if not line or len(line) < 15:
             continue
         if set(line) <= set('╔╗╚╝═║─│┌┐└┘┬┴├┤┼ '):
             continue
         
-        # Check patterns
         for pattern, severity in patterns:
             if re.search(pattern, line, re.IGNORECASE):
                 if line not in seen and len(line) < 300:
@@ -184,7 +181,7 @@ def generate_html_report(filepath, hostname, scan_type):
     sections = parse_linpeas_by_ansi_colors(raw_content)
     findings = extract_critical_findings(raw_content)
     
-    # Generate colored terminal HTML
+    # Generate colored terminal HTML with enhanced headers
     terminal_html = convert_ansi_to_html_colors(raw_content)
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -200,7 +197,7 @@ def generate_html_report(filepath, hostname, scan_type):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # Build JavaScript separately to avoid f-string issues
+    # JavaScript
     javascript = """
 <script>
 function sw(v) {
@@ -235,7 +232,7 @@ document.getElementById('sb').addEventListener('input', e => {
 </script>
     """
     
-    # HTML template
+    # HTML template with enhanced terminal styling
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -268,7 +265,9 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#00ff00;paddi
 .st{{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}}
 .st:hover{{background:rgba(0,255,0,0.2)}}
 .sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.5;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto;display:none}}
-.raw{{background:#1a1a2e;padding:20px;border-radius:10px;border:2px solid #00ff00;white-space:pre-wrap;font:12px 'Courier New',monospace;line-height:1.4;max-height:80vh;overflow-y:auto;color:#f8f8f2}}
+.raw{{background:#1a1a2e;padding:20px;border-radius:10px;border:2px solid #00ff00;font:12px 'Courier New',monospace;line-height:1.4;max-height:80vh;overflow-y:auto;color:#f8f8f2}}
+.term-header{{background:rgba(0,255,255,0.15);padding:8px 12px;margin:15px -12px;border-left:4px solid #00ffff;border-radius:3px}}
+.term-line{{margin:0;padding:2px 0}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
@@ -301,3 +300,5 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         result = generate_html_report(sys.argv[1], 'test', 'linpeas')
         print(f"✓ Report generated: {result}")
+    else:
+        print("Usage: python3 parser.py <linpeas_output_file>")
