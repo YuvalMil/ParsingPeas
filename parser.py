@@ -401,20 +401,25 @@ class ReportGenerator:
             if not sections:
                 continue
             
-            # Calculate stats for this category
-            cat_crit = 0
-            cat_high = 0
+            # FIX: Calculate stats for this category - count SECTIONS not individual findings
+            sections_with_crit = 0
+            sections_with_high = 0
             for title in sections.keys():
                 if title in self.parser.section_findings:
                     findings = self.parser.section_findings[title]
-                    cat_crit += sum(1 for f in findings if f['level'] == 'critical')
-                    cat_high += sum(1 for f in findings if f['level'] == 'high')
+                    has_critical = any(f['level'] == 'critical' for f in findings)
+                    has_high = any(f['level'] == 'high' for f in findings)
+                    
+                    if has_critical:
+                        sections_with_crit += 1
+                    elif has_high:  # Only count as 'high' if no critical
+                        sections_with_high += 1
             
             stats_badge = ""
-            if cat_crit > 0 or cat_high > 0:
+            if sections_with_crit > 0 or sections_with_high > 0:
                 parts = []
-                if cat_crit > 0: parts.append(f"<span class='stat-crit'>{cat_crit}C</span>")
-                if cat_high > 0: parts.append(f"<span class='stat-high'>{cat_high}H</span>")
+                if sections_with_crit > 0: parts.append(f"<span class='stat-crit'>{sections_with_crit}C</span>")
+                if sections_with_high > 0: parts.append(f"<span class='stat-high'>{sections_with_high}H</span>")
                 stats_badge = f"<span class='cat-stats'>{' '.join(parts)}</span>"
 
             toc_html.append(f'''
