@@ -183,10 +183,9 @@ def extract_critical_findings(content):
 
 
 def generate_html_report(filepath, hostname, scan_type):
-    """Generate interactive HTML report with lazy-loading"""
+    """Generate interactive HTML report"""
     
-    print(f"\n\U0001f525 ParsingPeas - Lazy-Loading Mode\n")
-    print(f"\U0001f4ca Parsing {filepath}...\n")
+    print(f"\n\U0001f4ca Parsing {filepath}...\n")
     
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -207,7 +206,7 @@ def generate_html_report(filepath, hostname, scan_type):
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    print("\n\U0001f4be Pre-processing views...")
+    print("\n\U0001f4bb Generating views...")
     terminal_html = convert_ansi_to_html_colors(raw_content, for_terminal=True)
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -217,156 +216,119 @@ def generate_html_report(filepath, hostname, scan_type):
     section_idx = 0
     for cat_name, cat_sections in categories.items():
         cat_id = cat_name.replace(' ', '_').replace('/', '_')
-        toc_html += f'<li class="cat"><div class="cat-title" onclick="window.toggleCat(\'{cat_id}\')">&gt; {escape(cat_name)} ({len(cat_sections)})</div>'
+        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{cat_id}\')">&gt; {escape(cat_name)} ({len(cat_sections)})</div>'
         toc_html += f'<ul class="cat-sections" id="cat-{cat_id}" style="display:none">'
         for section_title in cat_sections:
-            toc_html += f'<li><a href="#s{section_idx}" onclick="window.jump({section_idx}); return false;">{escape(section_title[:70])}</a></li>'
+            toc_html += f'<li><a href="#s{section_idx}" onclick="jump({section_idx}); return false;">{escape(section_title[:70])}</a></li>'
             section_idx += 1
         toc_html += '</ul></li>'
     
-    # Generate section shells
-    secs = ''
-    templates = ''
-    for i, (t, c) in enumerate(sections.items()):
-        secs += f'<div class="sec" id="s{i}"><div class="st" onclick="window.loadSection({i})">&gt; {escape(t)}</div><div class="sc" id="sc{i}"></div></div>'
-        colored_content = convert_ansi_to_html_colors(c, for_terminal=False)
-        templates += f'<template id="tpl{i}">{colored_content}</template>'
+    # Generate sections WITH COLORS
+    secs = ''.join([
+        f'<div class="sec" id="s{i}">'
+        f'<div class="st" onclick="tog(this)">&gt; {escape(t)}</div>'
+        f'<div class="sc">{convert_ansi_to_html_colors(c, for_terminal=False)}</div>'
+        f'</div>'
+        for i, (t, c) in enumerate(sections.items())
+    ])
     
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # Total section count for JS
-    section_count = len(sections)
-    
-    # HTML template (JavaScript as plain string, not f-string)
-    html = '''<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>ParsingPeas - ''' + escape(hostname) + '''</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;padding:20px}
-.hdr{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:30px;border-radius:10px;margin-bottom:30px;border:2px solid #00ff00}
-.hdr h1{font-size:2.5em;text-shadow:0 0 10px #00ff00;color:#00ff00}
-.info{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-top:20px}
-.info div{background:rgba(0,255,0,0.1);padding:10px;border-radius:5px;border-left:3px solid #00ff00;color:#ffffff}
-.badge{background:#00ff00;color:#0a0e27;padding:3px 8px;border-radius:3px;font-size:0.7em;font-weight:bold;margin-left:10px}
-.vb{padding:12px 24px;background:#1a1a2e;border:2px solid #00ff00;color:#00ff00;cursor:pointer;border-radius:5px;font:14px 'Courier New',monospace;margin-right:10px;transition:all .3s}
-.vb:hover{background:rgba(0,255,0,0.1)}
-.vb.active{background:#00ff00;color:#0a0e27;font-weight:bold}
-.vc{display:none}
-.vc.active{display:block}
-.toc{background:#1a1a2e;padding:20px;border-radius:10px;margin:20px 0;border:2px solid #00ff00;max-height:600px;overflow-y:auto}
-.toc h2{margin-bottom:15px;color:#00ff00}
-.toc ul{list-style:none}
-.toc li{margin:5px 0}
-.cat{margin:10px 0}
-.cat-title{color:#00ff00;font-weight:bold;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;cursor:pointer;user-select:none;transition:all .2s}
-.cat-title:hover{background:rgba(0,255,0,0.2)}
-.cat-sections{margin-left:20px;margin-top:5px}
-.cat-sections li{margin:5px 0}
-.cat-sections a{color:#50fa7b;text-decoration:none;display:block;padding:6px 10px;border-radius:3px;transition:all .2s;border-left:3px solid transparent}
-.cat-sections a:hover{background:rgba(0,255,0,0.15);border-left-color:#00ff00;padding-left:14px}
-.sb{width:100%;padding:15px;background:#1a1a2e;border:2px solid #00ff00;color:#00ff00;font-size:16px;border-radius:5px;margin-bottom:20px}
-.hl{background:#1a1a2e;padding:20px;border-radius:10px;margin-bottom:30px;border:2px solid #ff6b6b}
-.hl h2{color:#ff6b6b;margin-bottom:15px}
-.f{padding:10px;margin:5px 0;border-radius:5px;border-left:4px solid;font-size:13px;color:#ffffff}
-.critical{background:rgba(255,0,0,0.2);border-left-color:#f00}
-.high{background:rgba(255,107,107,0.2);border-left-color:#ff6b6b}
-.medium{background:rgba(255,165,0,0.2);border-left-color:#ffa500}
-.nf{color:#888;font-style:italic;padding:15px}
-.sec{background:#1a1a2e;padding:20px;margin-bottom:20px;border-radius:10px;border:1px solid #333;scroll-margin-top:20px}
-.st{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}
-.st:hover{background:rgba(0,255,0,0.2)}
-.sc{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto;display:none}
-.raw{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;font:12px 'Courier New',monospace;line-height:1.6;max-height:80vh;overflow-y:auto}
-.term-header{background:rgba(80,250,123,0.08);padding:4px 8px;margin:6px 0;border-left:3px solid #50fa7b;border-radius:3px}
-.sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{width:10px}
-.sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{background:#0a0e27}
-.sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{background:#00ff00;border-radius:5px}
-</style></head><body>
-<div class="hdr"><h1>&#129386; ParsingPeas Report<span class="badge">LAZY</span></h1>
-<div class="info"><div><strong>Hostname:</strong> ''' + escape(hostname) + '''</div><div><strong>Type:</strong> ''' + escape(scan_type) + '''</div><div><strong>Generated:</strong> ''' + timestamp + '''</div><div><strong>Sections:</strong> ''' + str(len(sections)) + '''</div></div></div>
-<div><button class="vb active" onclick="window.sw(0)">&#128202; Parsed</button><button class="vb" onclick="window.sw(1)">&#128187; Terminal</button></div>
-<div id="p" class="vc active">
-<div class="toc"><h2>&#128203; Contents (''' + str(len(categories)) + ''' categories)</h2><ul>''' + toc_html + '''</ul></div>
-<input type="text" class="sb" id="sb" placeholder="&#128269; Search..."/>
-<div class="hl"><h2>&#9888;&#65039; Critical Findings (''' + str(len(findings)) + ''')</h2>''' + finds + '''</div>
-<div>''' + secs + '''</div>
-</div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="&#128269; Search raw..."/><div class="raw" id="terminal-content"><p style="color:#f1fa8c;padding:20px">Click Terminal button above to load view</p></div></div>
-
-<div style="display:none">
-''' + templates + '''
-<template id="terminal-tpl">''' + terminal_html + '''</template>
-</div>
-
+    # JavaScript
+    javascript = """
 <script>
-const loaded = new Set();
-let terminalLoaded = false;
-
-window.sw = function(v) {
+function sw(v) {
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
     document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
-    
-    if (v === 1 && !terminalLoaded) {
-        console.log('Loading terminal view...');
-        const tpl = document.getElementById('terminal-tpl');
-        if (tpl) {
-            document.getElementById('terminal-content').innerHTML = tpl.innerHTML;
-            terminalLoaded = true;
-        }
-    }
-};
-
-window.loadSection = function(i) {
-    const container = document.getElementById('sc' + i);
-    const header = container.previousElementSibling;
-    
-    const isVisible = container.style.display === 'block';
-    container.style.display = isVisible ? 'none' : 'block';
-    header.innerHTML = (isVisible ? '&gt; ' : 'v ') + header.innerHTML.substring(header.innerHTML.indexOf(' ') + 1);
-    
-    if (!loaded.has(i) && !isVisible) {
-        console.log('Loading section ' + i);
-        const tpl = document.getElementById('tpl' + i);
-        if (tpl) {
-            container.innerHTML = tpl.innerHTML;
-            loaded.add(i);
-        }
-    }
-};
-
-window.toggleCat = function(id) {
-    const cat = document.getElementById('cat-' + id);
-    const title = event.target;
-    if (cat && title) {
-        const isVisible = cat.style.display !== 'none';
-        cat.style.display = isVisible ? 'none' : 'block';
-        const txt = title.textContent;
-        title.textContent = (isVisible ? '> ' : 'v ') + txt.substring(2);
-    }
-};
-
-window.jump = function(i) {
-    const s = document.getElementById('s' + i);
-    if (s) {
-        s.scrollIntoView({behavior: 'smooth'});
-        window.loadSection(i);
-    }
-};
-
-const searchBox = document.getElementById('sb');
-if (searchBox) {
-    searchBox.addEventListener('input', e => {
-        const q = e.target.value.toLowerCase();
-        document.querySelectorAll('.sec').forEach(s => {
-            s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
-        });
-    });
 }
 
-console.log('ParsingPeas loaded! Sections: ''' + str(section_count) + '''');
-console.log('Lazy-loading enabled');
+function tog(e) {
+    let c = e.nextElementSibling;
+    c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    e.innerHTML = c.style.display === 'none' ? '&gt; ' + e.innerHTML.slice(5) : 'v ' + e.innerHTML.slice(5);
+}
+
+function toggleCat(id) {
+    let cat = document.getElementById('cat-' + id);
+    let title = event.target;
+    cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
+    let txt = title.textContent;
+    title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + txt.substring(2);
+}
+
+function jump(i) {
+    let s = document.getElementById('s' + i);
+    s.scrollIntoView({behavior: 'smooth'});
+    let t = s.querySelector('.st');
+    let c = s.querySelector('.sc');
+    if (c.style.display === 'none') tog(t);
+}
+
+document.getElementById('sb').addEventListener('input', e => {
+    let q = e.target.value.toLowerCase();
+    document.querySelectorAll('.sec').forEach(s => {
+        s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
+    });
+});
 </script>
+    """
+    
+    # HTML template
+    html = f'''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;padding:20px}}
+.hdr{{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:30px;border-radius:10px;margin-bottom:30px;border:2px solid #00ff00}}
+.hdr h1{{font-size:2.5em;text-shadow:0 0 10px #00ff00;color:#00ff00}}
+.info{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-top:20px}}
+.info div{{background:rgba(0,255,0,0.1);padding:10px;border-radius:5px;border-left:3px solid #00ff00;color:#ffffff}}
+.vb{{padding:12px 24px;background:#1a1a2e;border:2px solid #00ff00;color:#00ff00;cursor:pointer;border-radius:5px;font:14px 'Courier New',monospace;margin-right:10px;transition:all .3s}}
+.vb:hover{{background:rgba(0,255,0,0.1)}}
+.vb.active{{background:#00ff00;color:#0a0e27;font-weight:bold}}
+.vc{{display:none}}
+.vc.active{{display:block}}
+.toc{{background:#1a1a2e;padding:20px;border-radius:10px;margin:20px 0;border:2px solid #00ff00;max-height:600px;overflow-y:auto}}
+.toc h2{{margin-bottom:15px;color:#00ff00}}
+.toc ul{{list-style:none}}
+.toc li{{margin:5px 0}}
+.cat{{margin:10px 0}}
+.cat-title{{color:#00ff00;font-weight:bold;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;cursor:pointer;user-select:none;transition:all .2s}}
+.cat-title:hover{{background:rgba(0,255,0,0.2)}}
+.cat-sections{{margin-left:20px;margin-top:5px}}
+.cat-sections li{{margin:5px 0}}
+.cat-sections a{{color:#50fa7b;text-decoration:none;display:block;padding:6px 10px;border-radius:3px;transition:all .2s;border-left:3px solid transparent}}
+.cat-sections a:hover{{background:rgba(0,255,0,0.15);border-left-color:#00ff00;padding-left:14px}}
+.sb{{width:100%;padding:15px;background:#1a1a2e;border:2px solid #00ff00;color:#00ff00;font-size:16px;border-radius:5px;margin-bottom:20px}}
+.hl{{background:#1a1a2e;padding:20px;border-radius:10px;margin-bottom:30px;border:2px solid #ff6b6b}}
+.hl h2{{color:#ff6b6b;margin-bottom:15px}}
+.f{{padding:10px;margin:5px 0;border-radius:5px;border-left:4px solid;font-size:13px;color:#ffffff}}
+.critical{{background:rgba(255,0,0,0.2);border-left-color:#f00}}
+.high{{background:rgba(255,107,107,0.2);border-left-color:#ff6b6b}}
+.medium{{background:rgba(255,165,0,0.2);border-left-color:#ffa500}}
+.nf{{color:#888;font-style:italic;padding:15px}}
+.sec{{background:#1a1a2e;padding:20px;margin-bottom:20px;border-radius:10px;border:1px solid #333;scroll-margin-top:20px}}
+.st{{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}}
+.st:hover{{background:rgba(0,255,0,0.2)}}
+.sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto;display:none}}
+.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;font:12px 'Courier New',monospace;line-height:1.6;max-height:80vh;overflow-y:auto}}
+.term-header{{background:rgba(80,250,123,0.08);padding:4px 8px;margin:6px 0;border-left:3px solid #50fa7b;border-radius:3px}}
+.sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
+.sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
+.sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
+</style></head><body>
+<div class="hdr"><h1>\U0001f95a ParsingPeas Report</h1>
+<div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
+<div><button class="vb active" onclick="sw(0)">\U0001f4ca Parsed</button><button class="vb" onclick="sw(1)">\U0001f4bb Terminal</button></div>
+<div id="p" class="vc active">
+<div class="toc"><h2>\U0001f4cb Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
+<input type="text" class="sb" id="sb" placeholder="\U0001f50d Search..."/>
+<div class="hl"><h2>\u26a0\ufe0f Critical Findings ({len(findings)})</h2>{finds}</div>
+<div>{secs}</div>
+</div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="\U0001f50d Search raw..."/><div class="raw">{terminal_html}</div></div>
+{javascript}
 </body></html>'''
     
     os.makedirs('reports', exist_ok=True)
@@ -376,8 +338,7 @@ console.log('Lazy-loading enabled');
     with open(report_path, 'w', encoding='utf-8', errors='xmlcharrefreplace') as f:
         f.write(html)
     
-    print(f"\n\u2705 Report generated: {report_path}")
-    print(f"\u26a1 Lazy-loading enabled - instant page load!\n")
+    print(f"\n\u2705 Report generated: {report_path}\n")
     return report_path
 
 
