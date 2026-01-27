@@ -62,23 +62,53 @@ def extract_highlights(content):
     
     highlights = []
     
-    # Patterns for important findings
+    # Patterns for ACTUAL privilege escalation findings
+    # These are much more specific to reduce false positives
     patterns = [
-        (r'.*99%.*', 'critical'),  # Very high confidence findings
-        (r'.*95%.*', 'high'),
-        (r'.*password.*', 'high'),
-        (r'.*root.*', 'medium'),
-        (r'.*sudo.*', 'medium'),
-        (r'.*writable.*', 'medium'),
+        # Linpeas confidence indicators
+        (r'RED/YELLOW.*99%', 'critical'),
+        (r'RED/YELLOW.*95%', 'critical'),
+        (r'.*99%.*PE vector', 'critical'),
+        (r'.*95%.*PE vector', 'high'),
+        
+        # Actual vulnerability indicators
+        (r'.*NOPASSWD.*', 'high'),  # Sudo without password
+        (r'.*\(ALL : ALL\).*', 'high'),  # Sudo all permissions
+        (r'.*SUID.*writable', 'high'),  # Writable SUID binaries
+        (r'.*password.*found', 'high'),  # Actual password found
+        (r'.*Vulnerable to CVE.*', 'high'),  # CVE mentions
+        (r'.*writable.*\.service', 'medium'),  # Writable service files
+        (r'.*writable.*cron', 'medium'),  # Writable cron files
+        (r'.*writable.*\.sh', 'medium'),  # Writable scripts
+        (r'.*world-writable', 'medium'),  # World writable files
+        
+        # Kernel exploits
+        (r'.*Dirty.*Cow', 'critical'),
+        (r'.*kernel.*exploit', 'high'),
     ]
     
+    seen_lines = set()  # Avoid duplicates
+    
     for line in content.split('\n'):
+        line_stripped = line.strip()
+        
+        # Skip empty lines and headers
+        if not line_stripped or len(line_stripped) < 10:
+            continue
+            
+        # Skip section headers
+        if '═' in line_stripped or '╔' in line_stripped or '╗' in line_stripped:
+            continue
+        
+        # Check against patterns
         for pattern, severity in patterns:
             if re.search(pattern, line, re.IGNORECASE):
-                highlights.append({
-                    'severity': severity,
-                    'content': line.strip()
-                })
+                if line_stripped not in seen_lines:
+                    highlights.append({
+                        'severity': severity,
+                        'content': line_stripped
+                    })
+                    seen_lines.add(line_stripped)
                 break
     
     return highlights[:50]  # Limit to top 50
@@ -165,6 +195,7 @@ def generate_html_report(filepath, hostname, scan_type):
             margin: 5px 0;
             border-radius: 5px;
             border-left: 4px solid;
+            font-size: 13px;
         }}
         
         .critical {{
@@ -239,6 +270,12 @@ def generate_html_report(filepath, hostname, scan_type):
             background: #00ff00;
             border-radius: 5px;
         }}
+        
+        .no-findings {{
+            color: #888;
+            font-style: italic;
+            padding: 15px;
+        }}
     </style>
 </head>
 <body>
@@ -264,7 +301,7 @@ def generate_html_report(filepath, hostname, scan_type):
     
     <div class="highlights">
         <h2>⚠️ Critical Findings ({len(highlights)})</h2>
-        {''.join([f'<div class="highlight-item {h["severity"]}">{escape(h["content"])}</div>' for h in highlights])}
+        {('<div class="no-findings">No high-priority findings detected. Review full sections below.</div>' if len(highlights) == 0 else ''.join([f'<div class="highlight-item {h["severity"]}">{escape(h["content"])}</div>' for h in highlights]))}
     </div>
     
     <div id="sections">
