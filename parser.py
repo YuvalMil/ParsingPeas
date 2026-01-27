@@ -38,22 +38,35 @@ class AnsiConverter:
         result = []
         current_style = {'color': None, 'bold': False, 'bg': None}
 
-        def get_span_tag(style):
+        def get_span_tag(text_content, style):
             css = []
             classes = []
             
-            # Add explicit class for red backgrounds (critical findings)
-            is_critical_bg = style['bg'] == '#ff0000'
-            if is_critical_bg:
+            # FORCE FIX: Check for specific critical keywords in text content
+            # If found, force Critical styling (Yellow on Red)
+            is_keyword_critical = False
+            if text_content and ("RED/YELLOW" in text_content or "RED:" in text_content):
+                is_keyword_critical = True
                 classes.append('crit-bg')
+                # Force specific styling for these keywords
+                css.append("color:#ffff00")
+                css.append("background-color:#ff0000")
+                css.append("font-weight:bold")
             
-            # CRITICAL FIX: Don't add inline color if crit-bg class is present
-            # This allows CSS to properly override with yellow color
-            if style['color'] and not is_critical_bg: 
-                css.append(f"color:{style['color']}")
-            
-            if style['bold']: css.append("font-weight:bold")
-            if style['bg']: css.append(f"background-color:{style['bg']}")
+            # Normal processing if not a special keyword override
+            if not is_keyword_critical:
+                # Add explicit class for red backgrounds (critical findings)
+                is_critical_bg = style['bg'] == '#ff0000'
+                if is_critical_bg:
+                    classes.append('crit-bg')
+                
+                # CRITICAL FIX: Don't add inline color if crit-bg class is present
+                # This allows CSS to properly override with yellow color
+                if style['color'] and not is_critical_bg: 
+                    css.append(f"color:{style['color']}")
+                
+                if style['bold']: css.append("font-weight:bold")
+                if style['bg']: css.append(f"background-color:{style['bg']}")
             
             if not css and not classes: return ""
             
@@ -82,7 +95,7 @@ class AnsiConverter:
                 elif code == '101': current_style['bg'] = '#ff0000'
 
             if text_segment:
-                span = get_span_tag(current_style)
+                span = get_span_tag(text_segment, current_style)
                 if span:
                     result.append(f"{span}{html.escape(text_segment)}</span>")
                 else:
