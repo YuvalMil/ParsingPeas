@@ -402,7 +402,10 @@ async function loadTerminalData() {{
         
         // Render first chunk immediately
         debugLog('Rendering first chunk');
+        debugLog('First chunk length', terminalData.chunks[0].length);
+        debugLog('First 100 chars', terminalData.chunks[0].substring(0, 100));
         pre.textContent = terminalData.chunks[0];
+        debugLog('Pre element textContent length after assignment', pre.textContent.length);
         currentChunk = 1;
         
         status.textContent = `Showing 1-${{Math.min(terminalData.chunk_size, terminalData.total_lines)}} of ${{terminalData.total_lines.toLocaleString()}} lines`;
@@ -413,7 +416,7 @@ async function loadTerminalData() {{
     }} catch(e) {{
         debugLog('ERROR loading terminal', e.toString());
         status.textContent = 'Error: ' + e.message;
-        pre.textContent = `Failed to load terminal data.\n\nError: ${{e.message}}\n\nMake sure to open via http:// (not file:///)\nRun: python3 -m http.server 8000`;
+        pre.textContent = `Failed to load terminal data.\\n\\nError: ${{e.message}}\\n\\nMake sure to open via http:// (not file:///)\\nRun: python3 -m http.server 8000`;
     }}
 }}
 
@@ -496,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {{
     debugLog('All systems initialized');
 }});
 
-debugLog('ParsingPeas Debug Edition v2.1 loaded');
+debugLog('ParsingPeas Debug Edition v2.2 loaded');
 </script>'''
     
     # HTML template with DEBUG CONSOLE
