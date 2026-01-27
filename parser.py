@@ -447,7 +447,7 @@ class ReportGenerator:
                     else:
                         indicator = f'<span class="toc-finding-dot high" onclick="toggleRead(this, event)" title="Click to mark read"></span>'
 
-                toc_html.append(f'<li><a href="#{sec_id}">{safe_title} {indicator}</a></li>')
+                toc_html.append(f'<li><a href="#{sec_id}"><span class="toc-title">{safe_title}</span>{indicator}</a></li>')
 
                 colored_content = converter.to_html(content)
                 
@@ -530,9 +530,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         summary:hover {{ background: rgba(255,255,255,0.08); color: #fff; }}
         summary::-webkit-details-marker {{ display: none; }}
         details[open] summary {{ color: var(--accent); }}
-        details li a {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
+        details li a {{ display: flex; align-items: center; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
         details li a:hover {{ color: white; background: rgba(255,255,255,0.05); }}
-        .toc-finding-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; cursor: pointer; transition: opacity 0.2s; }}
+        .toc-title {{ flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }}
+        .toc-finding-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: auto; cursor: pointer; transition: opacity 0.2s; flex: 0 0 auto; }}
         .toc-finding-dot:hover {{ transform: scale(1.2); }}
         .toc-finding-dot.high {{ background: var(--high-fg); box-shadow: 0 0 5px var(--high-fg); }}
         .toc-finding-dot.critical {{ background: var(--critical-bg); border: 2px solid var(--critical-fg); box-shadow: 0 0 5px var(--critical-bg); width: 8px; height: 8px; }}
