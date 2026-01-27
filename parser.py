@@ -80,53 +80,70 @@ class AnsiConverter:
 class CategoryManager:
     """Manages the categorization of checks."""
     
-    # 12 Granular Categories
+    # 12 Granular Categories with Expanded Keywords
     CATEGORIES = {
         "System Information": [
             "Basic information", "System Information", "OS Information", "Environment", 
-            "Operative system", "Hostname", "Env", "Version"
+            "Operative system", "Hostname", "Env", "Version", "Date & uptime", "PATH",
+            "linuxONE", "Syslog configuration", "Log files"
         ],
         "Kernel & Hardware": [
             "Kernel", "Loaded modules", "PCI devices", "USB devices", 
             "Dmesg output", "System stats", "CPU", "Drivers", "Processor",
-            "Virtual machine", "Module", "Signature enforcement"
+            "Virtual machine", "Module", "Signature enforcement", "lockdown mode",
+            "sd*/disk*", "Printer"
         ],
         "Security & Defenses": [
             "AppArmor", "SELinux", "ASLR", "Grub configuration", "Auditd", 
-            "Defender", "Firewall", "Protections", "Security"
+            "Defender", "Firewall", "Protections", "Security", "PaX", "Execshield",
+            "Seccomp", "User namespace", "Cgroup2", "kptr_restrict", "dmesg_restrict",
+            "ptrace_scope", "protected_symlinks", "protected_hardlinks", "perf_event_paranoid",
+            "mmap_min_addr", "ld.so"
         ],
         "Network Information": [
             "Network Information", "Interfaces", "Ports", "Listening", "Routes", 
-            "DNS", "Hosts", "ARP", "Netstat", "Shares"
+            "DNS", "Hosts", "ARP", "Netstat", "Shares", "Iptables", "Nftables", "UFW",
+            "Internet Access", "Sniffing Tools", "networkscripts"
         ],
         "User Information": [
             "User Information", "Users & Groups", "Password Policy", "Logon Sessions", 
             "LSA Secrets", "SAM", "Home folders", "Superusers", "Privileges", 
-            "Console", "Last logon", "Sessions", "Sudo version"
+            "Console", "Last logon", "Sessions", "Sudo version", "sudo l", "sudo tokens",
+            "Pkexec", "Polkit", "UID 0", "Logged in users", "Failed login attempts",
+            "su", "passwd file", "shadow file", "opasswd"
         ],
         "Processes, Cron & Services": [
             "Processes Information", "Processes & Cron", "Services Information", 
             "Systemd", "Cron", "Scheduled Tasks", "Autoruns", "Running Processes", 
-            "Binary processes", "Timers", "Sockets"
+            "Binary processes", "Timers", "Sockets", "Task_work", "Opened Files by processes",
+            "Service Files", "Active services", "Disabled services", "DBus", "Inetd",
+            "Xinetd", "rcommands", "rservice"
         ],
         "Software & Containers": [
             "Software Information", "Installed Software", "Compiler", "Container", 
-            "Docker", "Kubernetes", "LXC", "Useful Software"
+            "Docker", "Kubernetes", "LXC", "Useful Software", "Apache", "Nginx",
+            "MariaDB", "Rsync", "PHP", "FastCGI", "Postfix", "Github", "FTP",
+            "FreeIPA", "MySQL", "Postgres", "Mail"
         ],
         "Platform & Cloud": [
-            "Cloud", "AWS", "GCP", "Azure", "EC2", "Metadata"
+            "Cloud", "AWS", "GCP", "Azure", "EC2", "Metadata", "Droplet", "Aliyun", "Tencent"
         ],
         "Storage & Mounts": [
             "Mount points", "Disk space", "LVM information", "Partitions", 
-            "Drives", "NFS exports"
+            "Drives", "NFS exports", "Unmounted filesystem", "disk in /dev"
         ],
         "Files & Permissions": [
             "File Information", "Interesting Files", "Registry Information", 
-            "Writable Files", "Capabilities", "SUID", "SGID", "Permission"
+            "Writable Files", "Capabilities", "SUID", "SGID", "Permission",
+            "Deleted files", "ACLs", "Executable files", "Unexpected in",
+            "Readable files", "Writable", "Files inside", "Hidden files",
+            "Web files", "Backup", "profile.d", ".sh files"
         ],
         "Credentials & Secrets": [
             "Searching passwords", "Credentials", "API Keys", "Passwords", "Identities", 
-            "SSH Keys", "History Files", "Browser", "Mails", "GPG keys", "Keyring", "Clipboard"
+            "SSH Keys", "History Files", "Browser", "Mails", "GPG keys", "Keyring", "Clipboard",
+            "PGP", "PAM Auth", "Ldap Files", "SSH Files", "Certificates", "ssh and gpg agents",
+            "ssh config", "hashes", "shadow plists", "tables inside", ".db", ".sql", ".sqlite"
         ],
         "Vulnerabilities & Exploits": [
             "Exploits", "CVE", "Vulnerability", "Probes", "Exploit Suggester"
