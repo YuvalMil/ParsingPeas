@@ -283,7 +283,12 @@ function sw(v) {
         setTimeout(() => {
             try {
                 const rawDataBase64 = document.getElementById('raw-data').value;
+                console.log('Base64 length:', rawDataBase64.length);
+                if (!rawDataBase64) {
+                    throw new Error('No base64 data found');
+                }
                 const rawData = atob(rawDataBase64);
+                console.log('Decoded length:', rawData.length);
                 terminal.innerHTML = convertAnsiToHtml(rawData);
                 terminalLoaded = true;
                 console.log('Terminal loaded!');
@@ -363,7 +368,7 @@ console.log('ParsingPeas loaded!');
 </script>
     '''
     
-    # HTML template with textarea for base64 storage
+    # HTML template - DON'T escape base64!
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -408,7 +413,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 #raw-data{{display:none}}
 </style></head><body>
-<textarea id="raw-data">{escape(raw_base64)}</textarea>
+<textarea id="raw-data">{raw_base64}</textarea>
 <div class="hdr"><h1>ParsingPeas Report</h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
 <div><button class="vb active" onclick="sw(0)">Parsed</button><button class="vb" onclick="sw(1)">Terminal</button></div>
