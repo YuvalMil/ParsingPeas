@@ -25,11 +25,12 @@ class AnsiConverter:
     Uses a state-machine approach to ensure flat, valid HTML spans.
     """
 
+    # Updated to standard terminal colors for better readability
     COLORS = {
-        '30': '#000000', '31': '#ff5555', '32': '#50fa7b', '33': '#f1fa8c',
-        '34': '#8be9fd', '35': '#ff79c6', '36': '#8be9fd', '37': '#f8f8f2',
-        '90': '#6272a4', '91': '#ff6e6e', '92': '#69ff94', '93': '#ffffa5',
-        '94': '#d6acff', '95': '#ff92df', '96': '#a4ffff', '97': '#ffffff',
+        '30': '#000000', '31': '#cc0000', '32': '#4e9a06', '33': '#c4a000',
+        '34': '#3465a4', '35': '#75507b', '36': '#06989a', '37': '#d3d7cf',
+        '90': '#555753', '91': '#ef2929', '92': '#8ae234', '93': '#fce94f',
+        '94': '#729fcf', '95': '#ad7fa8', '96': '#34e2e2', '97': '#eeeeec',
     }
 
     def to_html(self, text):
@@ -284,6 +285,7 @@ class PeasParser:
                     if "https://" in clean: continue # URLs often red but not findings
                     if "Active Internet connections" in clean: continue
                     if "Proto Recv-Q" in clean: continue
+                    if "Unknown SUID binary" in clean: continue # Often misclassified
                     
                     level = 'high'
                     found = True
