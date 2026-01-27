@@ -7,6 +7,7 @@ Now with lazy-loading for performance!
 
 import os
 import re
+import json
 from datetime import datetime
 from html import escape
 from collections import OrderedDict
@@ -188,8 +189,8 @@ def extract_critical_findings(content):
 def generate_html_report(filepath, hostname, scan_type):
     """Generate interactive HTML report with lazy-loading"""
     
-    print(f"\n🔥 ParsingPeas - Lazy-Loading Mode\n")
-    print(f"📊 Parsing {filepath}...\n")
+    print(f"\n\U0001f525 ParsingPeas - Lazy-Loading Mode\n")
+    print(f"\U0001f4ca Parsing {filepath}...\n")
     
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -198,30 +199,30 @@ def generate_html_report(filepath, hostname, scan_type):
         with open(filepath, 'rb') as f:
             raw_content = f.read().decode('utf-8', errors='ignore')
     
-    print("🔍 Detecting sections...")
+    print("\U0001f50d Detecting sections...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
     
-    print("\n📁 Organizing into categories...")
+    print("\n\U0001f4c1 Organizing into categories...")
     categories = categorize_sections(sections)
     for cat_name, cat_sections in categories.items():
         print(f"  {cat_name}: {len(cat_sections)} sections")
     
-    print("\n⚠️  Extracting critical findings...")
+    print("\n\u26a0\ufe0f  Extracting critical findings...")
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    print("\n💾 Pre-processing views...")
+    print("\n\U0001f4be Pre-processing views...")
     terminal_html = convert_ansi_to_html_colors(raw_content, for_terminal=True)
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # Generate hierarchical TOC
+    # Generate hierarchical TOC with proper escaping
     toc_html = ''
     section_idx = 0
     for cat_name, cat_sections in categories.items():
         cat_id = cat_name.replace(' ', '_').replace('/', '_')
-        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{cat_id}\")"▶ {escape(cat_name)} ({len(cat_sections)})</div>'
-        toc_html += f'<ul class="cat-sections" id="cat-{cat_id}">'
+        toc_html += f'''<li class="cat"><div class="cat-title" onclick="toggleCat('{cat_id}')">▶ {escape(cat_name)} ({len(cat_sections)})</div>'''
+        toc_html += f'<ul class="cat-sections" id="cat-{cat_id}" style="display:none">'
         for section_title in cat_sections:
             toc_html += f'<li><a href="#s{section_idx}" onclick="jump({section_idx}); return false;">{escape(section_title[:70])}</a></li>'
             section_idx += 1
@@ -232,29 +233,32 @@ def generate_html_report(filepath, hostname, scan_type):
     templates = ''
     for i, (t, c) in enumerate(sections.items()):
         # Section shell (initially empty)
-        secs += f'<div class="sec" id="s{i}"><div class="st" onclick="loadSection({i})"▶ {escape(t)}</div><div class="sc" id="sc{i}"></div></div>'
+        secs += f'''<div class="sec" id="s{i}"><div class="st" onclick="loadSection({i})">▶ {escape(t)}</div><div class="sc" id="sc{i}"></div></div>'''
         # Content stored in template (not rendered)
-        templates += f'<template id="tpl{i}">{convert_ansi_to_html_colors(c, for_terminal=False)}</template>'
+        colored_content = convert_ansi_to_html_colors(c, for_terminal=False)
+        templates += f'<template id="tpl{i}">{colored_content}</template>'
     
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript with lazy-loading
+    # JavaScript with lazy-loading (FIXED)
     javascript = f"""
 <script>
 const loaded = new Set();
-const terminalLoaded = false;
+let terminalLoaded = false;
 
 function sw(v) {{
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
     document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
     
     // Lazy-load terminal view
-    if (v === 1 && !window.terminalLoaded) {{
-        console.log('⚡ Loading terminal view...');
+    if (v === 1 && !terminalLoaded) {{
+        console.log('\u26a1 Loading terminal view...');
         const tpl = document.getElementById('terminal-tpl');
-        document.getElementById('terminal-content').innerHTML = tpl.innerHTML;
-        window.terminalLoaded = true;
+        if (tpl) {{
+            document.getElementById('terminal-content').innerHTML = tpl.innerHTML;
+            terminalLoaded = true;
+        }}
     }}
 }}
 
@@ -263,45 +267,55 @@ function loadSection(i) {{
     const header = container.previousElementSibling;
     
     // Toggle visibility
-    const isVisible = container.style.display !== 'none';
+    const isVisible = container.style.display === 'block';
     container.style.display = isVisible ? 'none' : 'block';
-    header.innerHTML = (isVisible ? '▶ ' : '▼ ') + header.innerHTML.slice(2);
+    header.innerHTML = (isVisible ? '\u25b6 ' : '\u25bc ') + header.innerHTML.slice(2);
     
     // Lazy-load content if not already loaded
     if (!loaded.has(i) && !isVisible) {{
-        console.log('⚡ Loading section ' + i);
+        console.log('\u26a1 Loading section ' + i);
         const tpl = document.getElementById('tpl' + i);
-        container.innerHTML = tpl.innerHTML;
-        loaded.add(i);
+        if (tpl) {{
+            container.innerHTML = tpl.innerHTML;
+            loaded.add(i);
+        }}
     }}
 }}
 
 function toggleCat(id) {{
-    let cat = document.getElementById('cat-' + id);
-    let title = event.target;
-    cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
-    title.innerHTML = cat.style.display === 'none' ? '▶ ' + title.innerHTML.slice(2) : '▼ ' + title.innerHTML.slice(2);
+    const cat = document.getElementById('cat-' + id);
+    const title = event.target;
+    if (cat && title) {{
+        const isVisible = cat.style.display !== 'none';
+        cat.style.display = isVisible ? 'none' : 'block';
+        title.innerHTML = (isVisible ? '\u25b6 ' : '\u25bc ') + title.innerHTML.slice(2);
+    }}
 }}
 
 function jump(i) {{
-    let s = document.getElementById('s' + i);
-    s.scrollIntoView({{behavior: 'smooth'}});
-    loadSection(i);
+    const s = document.getElementById('s' + i);
+    if (s) {{
+        s.scrollIntoView({{behavior: 'smooth'}});
+        loadSection(i);
+    }}
 }}
 
-document.getElementById('sb').addEventListener('input', e => {{
-    let q = e.target.value.toLowerCase();
-    document.querySelectorAll('.sec').forEach(s => {{
-        s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
+const searchBox = document.getElementById('sb');
+if (searchBox) {{
+    searchBox.addEventListener('input', e => {{
+        const q = e.target.value.toLowerCase();
+        document.querySelectorAll('.sec').forEach(s => {{
+            s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
+        }});
     }});
-}});
+}}
 
-console.log('🔥 ParsingPeas loaded! Sections: {len(sections)}');
-console.log('⚡ Lazy-loading enabled - sections load on demand');
+console.log('\U0001f525 ParsingPeas loaded! Sections: {len(sections)}');
+console.log('\u26a1 Lazy-loading enabled - sections load on demand');
 </script>
     """
     
-    # HTML with lazy-loading architecture
+    # HTML with lazy-loading architecture (FIXED)
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -324,7 +338,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .cat{{margin:10px 0}}
 .cat-title{{color:#00ff00;font-weight:bold;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;cursor:pointer;user-select:none;transition:all .2s}}
 .cat-title:hover{{background:rgba(0,255,0,0.2)}}
-.cat-sections{{display:none;margin-left:20px;margin-top:5px}}
+.cat-sections{{margin-left:20px;margin-top:5px}}
 .cat-sections li{{margin:5px 0}}
 .cat-sections a{{color:#50fa7b;text-decoration:none;display:block;padding:6px 10px;border-radius:3px;transition:all .2s;border-left:3px solid transparent}}
 .cat-sections a:hover{{background:rgba(0,255,0,0.15);border-left-color:#00ff00;padding-left:14px}}
@@ -346,16 +360,16 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 </style></head><body>
-<div class="hdr"><h1>🥒 ParsingPeas Report<span class="badge">LAZY</span></h1>
+<div class="hdr"><h1>\U0001f95a ParsingPeas Report<span class="badge">LAZY</span></h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
-<div><button class="vb active" onclick="sw(0)">📊 Parsed</button><button class="vb" onclick="sw(1)">💻 Terminal</button></div>
+<div><button class="vb active" onclick="sw(0)">\U0001f4ca Parsed</button><button class="vb" onclick="sw(1)">\U0001f4bb Terminal</button></div>
 <div id="p" class="vc active">
-<div class="toc"><h2>📋 Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
-<input type="text" class="sb" id="sb" placeholder="🔍 Search..."/>
-<div class="hl"><h2>⚠️ Critical Findings ({len(findings)})</h2>{finds}</div>
+<div class="toc"><h2>\U0001f4cb Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
+<input type="text" class="sb" id="sb" placeholder="\U0001f50d Search..."/>
+<div class="hl"><h2>\u26a0\ufe0f Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="🔍 Search raw..."/><div class="raw" id="terminal-content"><p style="color:#f1fa8c;padding:20px">⚡ Click to load terminal view (lazy-loaded for performance)</p></div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="\U0001f50d Search raw..."/><div class="raw" id="terminal-content"><p style="color:#f1fa8c;padding:20px">\u26a1 Click "Terminal" button above to load terminal view (lazy-loaded for performance)</p></div></div>
 
 <!-- Hidden templates for lazy-loading -->
 <div style="display:none">
@@ -373,8 +387,8 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
     with open(report_path, 'w', encoding='utf-8', errors='xmlcharrefreplace') as f:
         f.write(html)
     
-    print(f"\n✅ Report generated: {report_path}")
-    print(f"⚡ Lazy-loading enabled - instant page load!\n")
+    print(f"\n\u2705 Report generated: {report_path}")
+    print(f"\u26a1 Lazy-loading enabled - instant page load!\n")
     return report_path
 
 
