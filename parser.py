@@ -19,6 +19,19 @@ from collections import OrderedDict
 # --- Configuration ---
 CHUNK_SIZE = 2000  # Lines per chunk for terminal view loading
 
+# Critical finding keywords for intelligent detection
+CRITICAL_KEYWORDS = [
+    'cap_', 'CAP_',  # Linux capabilities
+    'PEASS',  # LinPEAS markers
+    '95%', '99%',  # High confidence
+    'PE vector',
+    'RED/YELLOW', 'RED:',
+    'writable', 'WRITABLE',
+    'password', 'PASSWORD',
+    'root owned',
+    'possible CVE'
+]
+
 class AnsiConverter:
     """
     Handles conversion of ANSI codes to HTML for report viewing.
@@ -42,31 +55,36 @@ class AnsiConverter:
             css = []
             classes = []
             
-            # FORCE FIX: Check for specific critical keywords in text content
-            # If found, force Critical styling (Yellow on Red)
-            is_keyword_critical = False
-            if text_content and ("RED/YELLOW" in text_content or "RED:" in text_content):
-                is_keyword_critical = True
+            # CRITICAL FIX: Smart detection for critical patterns
+            is_critical = False
+            
+            # Pattern 1: Red background = always critical
+            if style['bg'] == '#ff0000':
+                is_critical = True
+            
+            # Pattern 2: Specific critical keywords
+            elif text_content:
+                if any(kw in text_content for kw in ['RED/YELLOW', 'RED:']):
+                    is_critical = True
+                # Pattern 3: Bold red text ONLY if it contains LinPEAS critical indicators
+                elif style['bold'] and style['color'] == '#cc0000':
+                    if any(kw in text_content for kw in CRITICAL_KEYWORDS):
+                        is_critical = True
+            
+            # Apply critical styling
+            if is_critical:
                 classes.append('crit-bg')
-                # Force specific styling for these keywords
                 css.append("color:#ffff00")
                 css.append("background-color:#ff0000")
                 css.append("font-weight:bold")
-            
-            # Normal processing if not a special keyword override
-            if not is_keyword_critical:
-                # Add explicit class for red backgrounds (critical findings)
-                is_critical_bg = style['bg'] == '#ff0000'
-                if is_critical_bg:
-                    classes.append('crit-bg')
-                
-                # CRITICAL FIX: Don't add inline color if crit-bg class is present
-                # This allows CSS to properly override with yellow color
-                if style['color'] and not is_critical_bg: 
+            else:
+                # Normal processing for non-critical text
+                if style['color']: 
                     css.append(f"color:{style['color']}")
-                
-                if style['bold']: css.append("font-weight:bold")
-                if style['bg']: css.append(f"background-color:{style['bg']}")
+                if style['bold']: 
+                    css.append("font-weight:bold")
+                if style['bg']: 
+                    css.append(f"background-color:{style['bg']}")
             
             if not css and not classes: return ""
             
