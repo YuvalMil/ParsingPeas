@@ -84,8 +84,9 @@ class CategoryManager:
             "Operative system", "Hostname", "Env", "Version"
         ],
         "Kernel & Hardware": [
-            "Kernel information", "Loaded modules", "PCI devices", "USB devices", 
-            "Dmesg output", "System stats", "CPU", "Drivers", "Processor"
+            "Kernel", "Loaded modules", "PCI devices", "USB devices", 
+            "Dmesg output", "System stats", "CPU", "Drivers", "Processor",
+            "Virtual machine", "Module", "Signature enforcement"
         ],
         "Security & Defenses": [
             "AppArmor", "SELinux", "ASLR", "Grub configuration", "Auditd", 
@@ -379,7 +380,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <title>ParsingPeas: {hostname}</title>
     <style>
-        :root {{ --bg: #0f0f12; --text: #e0e0e0; --accent: #00ff00; --panel: #1a1a1f; --border: #333; --critical: #ff5555; --high: #ffb86c; }}
+        :root {{ 
+            --bg: #0f0f12; 
+            --text: #e0e0e0; 
+            --accent: #00ff00; 
+            --panel: #1a1a1f; 
+            --border: #333; 
+            /* Correct LinPEAS Colors */
+            --critical-bg: #ff0000;
+            --critical-fg: #ffff00;
+            --critical-glow: rgba(255, 0, 0, 0.4);
+            --high-fg: #ff4444;
+        }}
         body {{ background: var(--bg); color: var(--text); font-family: 'Segoe UI', 'Consolas', monospace; margin: 0; display: flex; height: 100vh; overflow: hidden; }}
         
         aside {{ width: 340px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; user-select: none; }}
@@ -387,6 +399,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         nav {{ flex: 1; overflow-y: auto; padding: 10px; }}
         nav ul {{ list-style: none; padding: 0; margin: 0; }}
         
+        /* Sidebar Controls */
+        .nav-controls {{ padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid var(--border); }}
+        .nav-btn {{ flex: 1; background: #25252b; color: #aaa; border: 1px solid #444; border-radius: 4px; padding: 4px; cursor: pointer; font-size: 0.8em; }}
+        .nav-btn:hover {{ color: #fff; border-color: #666; }}
+
         details {{ margin-bottom: 5px; }}
         summary {{ cursor: pointer; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 4px; font-weight: bold; font-size: 0.9em; list-style: none; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }}
         summary:hover {{ background: rgba(255,255,255,0.08); color: #fff; }}
@@ -395,7 +412,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         details li a {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
         details li a:hover {{ color: white; background: rgba(255,255,255,0.05); }}
-        .toc-finding-dot {{ width: 8px; height: 8px; background: var(--high); border-radius: 50%; box-shadow: 0 0 5px var(--high); }}
+        .toc-finding-dot {{ width: 8px; height: 8px; background: var(--high-fg); border-radius: 50%; box-shadow: 0 0 5px var(--high-fg); }}
         
         .count {{ font-size: 0.8em; opacity: 0.5; font-weight: normal; background: #333; padding: 2px 6px; border-radius: 10px; }}
         
@@ -413,14 +430,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         .finding-card {{ background: #25252b; border: 1px solid #444; border-radius: 8px; padding: 20px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 10px; }}
         .finding-card:hover {{ transform: translateY(-3px); border-color: #777; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }}
-        .finding-card.critical {{ border-top: 4px solid var(--critical); }}
-        .finding-card.high {{ border-top: 4px solid var(--high); }}
+        
+        /* Correct LinPEAS Critical Styling */
+        .finding-card.critical {{ border-top: 4px solid var(--critical-bg); box-shadow: 0 0 10px var(--critical-glow) inset; }}
+        .finding-card.high {{ border-top: 4px solid var(--high-fg); }}
         
         .finding-header {{ font-weight: bold; font-size: 1.1em; color: #fff; margin-bottom: 5px; }}
         .finding-stats {{ display: flex; gap: 10px; }}
+        
         .badge {{ padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8em; color: #000; }}
-        .badge.critical {{ background: var(--critical); }}
-        .badge.high {{ background: var(--high); }}
+        /* Critical = Red Background + Yellow Text */
+        .badge.critical {{ background: var(--critical-bg); color: var(--critical-fg); text-shadow: 1px 1px 0 #000; }}
+        .badge.high {{ background: var(--high-fg); color: #000; }}
         
         .finding-footer {{ font-size: 0.8em; color: #666; margin-top: auto; text-align: right; }}
         
@@ -444,6 +465,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
     <aside>
         <div class="brand">ParsingPeas</div>
+        <div class="nav-controls">
+            <button class="nav-btn" onclick="expandAll(true)">+ Open All</button>
+            <button class="nav-btn" onclick="expandAll(false)">- Close All</button>
+        </div>
         <nav>
             <ul>
                 {toc}
@@ -481,6 +506,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let terminalLoaded = false;
         let chunks = [];
         let nextChunkIdx = 0;
+        
+        function expandAll(open) {{
+            document.querySelectorAll('details').forEach(el => el.open = open);
+        }}
         
         function switchView(viewName) {{
             document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
