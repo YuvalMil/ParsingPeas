@@ -266,7 +266,7 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript - SIMPLIFIED terminal rendering
+    # JavaScript - USE TEXTCONTENT NOT INNERHTML
     javascript = r'''
 <script>
 let terminalLoaded = false;
@@ -278,7 +278,7 @@ function sw(v) {
     if (v === 1 && !terminalLoaded) {
         console.log('Loading terminal view...');
         const terminal = document.getElementById('terminal-content');
-        terminal.innerHTML = '<p style="color:#f1fa8c;padding:20px">Processing terminal view...</p>';
+        const pre = document.getElementById('terminal-pre');
         
         setTimeout(() => {
             try {
@@ -290,10 +290,12 @@ function sw(v) {
                 const rawData = atob(rawDataBase64);
                 console.log('Decoded length:', rawData.length);
                 
-                // Simple approach: strip ANSI, escape HTML, wrap in pre
-                let clean = rawData.replace(/\x1B\[[0-9;]*m/g, '');
-                clean = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                terminal.innerHTML = '<pre style="color:#50fa7b;margin:0;white-space:pre-wrap;word-wrap:break-word">' + clean + '</pre>';
+                // Strip ANSI codes
+                const clean = rawData.replace(/\x1B\[[0-9;]*m/g, '');
+                console.log('Cleaned length:', clean.length);
+                
+                // Use textContent - NO HTML PARSING!
+                pre.textContent = clean;
                 
                 terminalLoaded = true;
                 console.log('Terminal loaded!');
@@ -339,7 +341,7 @@ console.log('ParsingPeas loaded!');
 </script>
     '''
     
-    # HTML template - DON'T escape base64!
+    # HTML template
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -377,7 +379,8 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .st{{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}}
 .st:hover{{background:rgba(0,255,0,0.2)}}
 .sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto}}
-.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;font:12px 'Courier New',monospace;line-height:1.6;max-height:80vh;overflow-y:auto}}
+.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;max-height:80vh;overflow-y:auto}}
+#terminal-pre{{color:#50fa7b;margin:0;white-space:pre-wrap;word-wrap:break-word;font:12px 'Courier New',monospace;line-height:1.6}}
 .term-header{{background:rgba(80,250,123,0.08);padding:4px 8px;margin:6px 0;border-left:3px solid #50fa7b;border-radius:3px}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
@@ -394,7 +397,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 <div class="hl"><h2>Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><p style="color:#f1fa8c;padding:20px">Click Terminal button above to load raw output</p></div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><pre id="terminal-pre">Click Terminal button above to load raw output</pre></div></div>
 {javascript}
 </body></html>'''
     
