@@ -204,7 +204,7 @@ class PeasParser:
             clean_line = self.converter.strip(line).strip()
             is_header = False
             if header_ansi_pattern in line:
-                if any(c in line for c in '╔════'):
+                if any(c in line for c in '╔═══'):
                     is_header = True
                 elif clean_line.startswith('[+]') or clean_line.startswith('[-]'):
                     if len(clean_line) < 80 and not clean_line.endswith(':'):
@@ -369,7 +369,6 @@ class ReportGenerator:
 
                 toc_html.append(f'<li><a href="#{sec_id}">{safe_title} {indicator}</a></li>')
 
-                # Ensure critical text is red in content
                 colored_content = converter.to_html(content)
                 
                 content_html.append(f'''
@@ -487,9 +486,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .section-category {{ font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; color: #666; border: 1px solid #333; padding: 4px 8px; border-radius: 4px; }}
         .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.3em; }}
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
-        pre.content {{ white-space: pre-wrap; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; }}
-        /* Force Critical Colors in Body */
-        span[style*='background-color:#ff0000'] {{ color: #ffff00 !important; font-weight: bold; padding: 2px 4px; border-radius: 2px; }}
+        pre.content {{ white-space: pre-wrap; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.5; }}
+        /* Enhance visibility for bold white on red (critical findings in body) */
+        pre.content span[style*='background-color:#ff0000'] {{ color: #fff !important; font-weight: bold; padding: 2px 4px; border-radius: 2px; }}
 
         #terminal-view {{ background: #000; padding: 20px; }}
         #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; }}
@@ -584,7 +583,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             event.preventDefault();
             event.stopPropagation();
             el.classList.toggle('read');
-            // Basic persistence simulation (in a real app, save to localStorage)
         }}
     </script>
 </body>
