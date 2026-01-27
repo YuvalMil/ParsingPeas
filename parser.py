@@ -569,8 +569,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
         pre.content {{ white-space: pre-wrap; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
         
-        /* Critical background styling - use class-based targeting */
-        .crit-bg {{ color: #ffff00 !important; background-color: #ff0000 !important; font-weight: bold !important; padding: 2px 4px; border-radius: 2px; }}
+        /* Critical background styling - keep it "cell aligned" (no padding/radius) so ASCII art doesn't break */
+        .crit-bg {{ color: #ffff00 !important; background-color: #ff0000 !important; font-weight: bold !important; padding: 0 !important; border-radius: 0 !important; }}
 
         #terminal-view {{ background: #000; padding: 20px; }}
         #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; line-height: 1.15; }}
