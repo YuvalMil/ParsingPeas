@@ -6,7 +6,6 @@ Parses linpeas/winpeas output and generates interactive HTML reports
 
 import os
 import re
-import json
 import base64
 from datetime import datetime
 from html import escape
@@ -237,9 +236,10 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    print("\n\U0001f4be Preparing terminal data (lazy-load)...")
-    # Store raw content for lazy loading - escape for JavaScript string
-    raw_escaped = raw_content.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '')
+    print("\n\U0001f4be Encoding terminal data (base64)...")
+    # Encode raw content as base64 - NO ESCAPING ISSUES!
+    raw_base64 = base64.b64encode(raw_content.encode('utf-8')).decode('ascii')
+    print(f"  Encoded size: {len(raw_base64)} bytes")
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -267,15 +267,11 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # Limit raw data size (first 500KB)
-    if len(raw_escaped) > 500000:
-        raw_escaped = raw_escaped[:500000] + '\\n\\n[... Output truncated at 500KB for performance ...]'
-    
-    # JavaScript with lazy terminal loading
+    # JavaScript with base64 decoding
     javascript = f'''
 <script>
 let terminalLoaded = false;
-const rawData = "{raw_escaped}";
+const rawDataBase64 = "{raw_base64}";
 
 function sw(v) {{
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
@@ -287,27 +283,41 @@ function sw(v) {{
         terminal.innerHTML = '<p style="color:#f1fa8c;padding:20px">Processing terminal view...</p>';
         
         setTimeout(() => {{
-            terminal.innerHTML = convertAnsiToHtml(rawData);
-            terminalLoaded = true;
-            console.log('Terminal loaded!');
+            try {{
+                // Decode base64
+                const rawData = atob(rawDataBase64);
+                terminal.innerHTML = convertAnsiToHtml(rawData);
+                terminalLoaded = true;
+                console.log('Terminal loaded!');
+            }} catch(e) {{
+                terminal.innerHTML = '<p style="color:#ff6b6b;padding:20px">Error loading terminal: ' + e.message + '</p>';
+                console.error('Terminal load error:', e);
+            }}
         }}, 100);
     }}
 }}
 
 function convertAnsiToHtml(text) {{
-    const lines = text.split('\\n');
+    const lines = text.split('\n');
     const result = [];
     
     for (let line of lines) {{
         let processed = line;
         
-        // Basic ANSI color mapping
+        // ANSI color mapping
         processed = processed.replace(/\x1B\[1;31m/g, '<span style="color:#ff6b6b;font-weight:bold">');
         processed = processed.replace(/\x1B\[1;32m/g, '<span style="color:#50fa7b;font-weight:bold">');
         processed = processed.replace(/\x1B\[1;33m/g, '<span style="color:#f1fa8c;font-weight:bold">');
+        processed = processed.replace(/\x1B\[1;34m/g, '<span style="color:#8be9fd;font-weight:bold">');
+        processed = processed.replace(/\x1B\[1;35m/g, '<span style="color:#ff79c6;font-weight:bold">');
+        processed = processed.replace(/\x1B\[1;36m/g, '<span style="color:#8be9fd;font-weight:bold">');
         processed = processed.replace(/\x1B\[31m/g, '<span style="color:#ff5555">');
         processed = processed.replace(/\x1B\[32m/g, '<span style="color:#50fa7b">');
         processed = processed.replace(/\x1B\[33m/g, '<span style="color:#f1fa8c">');
+        processed = processed.replace(/\x1B\[34m/g, '<span style="color:#8be9fd">');
+        processed = processed.replace(/\x1B\[35m/g, '<span style="color:#ff79c6">');
+        processed = processed.replace(/\x1B\[36m/g, '<span style="color:#8be9fd">');
+        processed = processed.replace(/\x1B\[37m/g, '<span style="color:#f8f8f2">');
         processed = processed.replace(/\x1B\[0m/g, '</span>');
         processed = processed.replace(/\x1B\[m/g, '</span>');
         processed = processed.replace(/\x1B\[[0-9;]*m/g, '');
@@ -320,7 +330,7 @@ function convertAnsiToHtml(text) {{
         result.push(processed + '<br>');
     }}
     
-    return result.join('\\n');
+    return result.join('\n');
 }}
 
 function tog(e) {{
