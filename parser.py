@@ -190,7 +190,7 @@ def generate_html_report(filepath, hostname, scan_type):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     # Generate TOC
-    toc = ''.join([f'<li><a href="#s{i}" onclick="jump({i})">{escape(t[:70])}</a></li>' 
+    toc = ''.join([f'<li><a href="#s{i}" onclick="jump({i}); return false;">{escape(t[:70])}</a></li>' 
                    for i, t in enumerate(sections.keys())])
     
     # Generate sections
@@ -200,7 +200,42 @@ def generate_html_report(filepath, hostname, scan_type):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # HTML template (minified)
+    # Build JavaScript separately to avoid f-string issues
+    javascript = """
+<script>
+function sw(v) {
+    document.querySelectorAll('.vb').forEach((b,i) => {
+        b.classList.toggle('active', i===v);
+    });
+    document.querySelectorAll('.vc').forEach((c,i) => {
+        c.classList.toggle('active', i===v);
+    });
+}
+
+function tog(e) {
+    let c = e.nextElementSibling;
+    c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    e.innerHTML = c.style.display === 'none' ? '▶ ' + e.innerHTML.slice(2) : '▼ ' + e.innerHTML.slice(2);
+}
+
+function jump(i) {
+    let s = document.getElementById('s' + i);
+    s.scrollIntoView({behavior: 'smooth'});
+    let t = s.querySelector('.st');
+    let c = s.querySelector('.sc');
+    if (c.style.display === 'none') tog(t);
+}
+
+document.getElementById('sb').addEventListener('input', e => {
+    let q = e.target.value.toLowerCase();
+    document.querySelectorAll('.sec').forEach(s => {
+        s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
+    });
+});
+</script>
+    """
+    
+    # HTML template
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -248,12 +283,8 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#00ff00;paddi
 <div>{secs}</div>
 </div>
 <div id="r" class="vc"><input type="text" class="sb" placeholder="🔍 Search raw..."/><div class="raw">{terminal_html}</div></div>
-<script>
-function sw(v){{document.querySelectorAll('.vb').forEach((b,i)=>{{b.classList.toggle('active',i===v)}});document.querySelectorAll('.vc').forEach((c,i)=>{{c.classList.toggle('active',i===v)}})}}}
-function tog(e){{let c=e.nextElementSibling;c.style.display=c.style.display==='none'?'block':'none';e.innerHTML=c.style.display==='none'?'▶ '+e.innerHTML.slice(2):'▼ '+e.innerHTML.slice(2)}}}
-function jump(i){{let s=document.getElementById('s'+i);s.scrollIntoView({{behavior:'smooth'}});let t=s.querySelector('.st'),c=s.querySelector('.sc');if(c.style.display==='none')tog(t)}}}
-document.getElementById('sb').addEventListener('input',e=>{{let q=e.target.value.toLowerCase();document.querySelectorAll('.sec').forEach(s=>{{s.style.display=s.textContent.toLowerCase().includes(q)?'block':'none'}})}}});
-</script></body></html>'''
+{javascript}
+</body></html>'''
     
     # Save report
     report_filename = f"report_{hostname}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
