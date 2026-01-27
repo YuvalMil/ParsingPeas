@@ -520,37 +520,10 @@ class ReportGenerator:
 
             toc_html.append('</ul></details></li>')
 
-        findings_html = []
-        if not self.parser.section_findings:
-            findings_html.append('<div class="finding-card empty">No critical findings automatically detected.</div>')
-        else:
-            for title, findings_list in self.parser.section_findings.items():
-                sec_id = self.parser.section_ids[title]
-                crit_count = sum(1 for f in findings_list if f['level'] == 'critical')
-                high_count = sum(1 for f in findings_list if f['level'] == 'high')
-
-                card_class = "critical" if crit_count > 0 else "high"
-
-                findings_html.append(f'''
-                <div class="finding-card {card_class}" onclick="scrollToSection('{sec_id}')">
-                    <div class="finding-header">
-                        <span class="section-name">{html.escape(title)}</span>
-                    </div>
-                    <div class="finding-stats">
-                        {f'<span class="badge critical">{crit_count} Critical</span>' if crit_count else ''}
-                        {f'<span class="badge high">{high_count} High</span>' if high_count else ''}
-                    </div>
-                    <div class="finding-footer">
-                        Click to view details &rarr;
-                    </div>
-                </div>
-                ''')
-
         return HTML_TEMPLATE.format(
             hostname=self.parser.hostname,
             timestamp=self.timestamp,
             toc='\n'.join(toc_html),
-            findings='\n'.join(findings_html),
             content='\n'.join(content_html),
             json_file=json_file
         )
@@ -658,9 +631,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class=\"meta-info\">Host: <strong>{hostname}</strong> | {timestamp}</div>
         </header>
         <div id=\"report-view\" class=\"view active\">
-            <h2 style=\"color:white; margin-top:0\">Critical Findings</h2>
-            <div id=\"findings-grid\">{findings}</div>
-            <hr style=\"border:0; border-top:1px solid #333; margin: 40px 0;\">
             {content}
         </div>
         <div id=\"terminal-view\" class=\"view\">
