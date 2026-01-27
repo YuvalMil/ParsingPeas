@@ -567,13 +567,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .section-category {{ font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; color: #666; border: 1px solid #333; padding: 4px 8px; border-radius: 4px; }}
         .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.3em; }}
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
-        pre.content {{ white-space: pre-wrap; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
+        pre.content {{ white-space: pre; overflow-x: auto; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
         
         /* Critical background styling - keep it "cell aligned" (no padding/radius) so ASCII art doesn't break */
         .crit-bg {{ color: #ffff00 !important; background-color: #ff0000 !important; font-weight: bold !important; padding: 0 !important; border-radius: 0 !important; }}
 
         #terminal-view {{ background: #000; padding: 20px; }}
-        #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; line-height: 1.15; }}
+        #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; line-height: 1.15; white-space: pre; overflow-x: auto; }}
         #loading {{ position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: #000; padding: 10px 20px; border-radius: 20px; font-weight: bold; display: none; }}
         ::-webkit-scrollbar {{ width: 8px; }}
         ::-webkit-scrollbar-track {{ background: #0f0f12; }}
