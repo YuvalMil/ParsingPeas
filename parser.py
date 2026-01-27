@@ -43,10 +43,15 @@ class AnsiConverter:
             classes = []
             
             # Add explicit class for red backgrounds (critical findings)
-            if style['bg'] == '#ff0000':
+            is_critical_bg = style['bg'] == '#ff0000'
+            if is_critical_bg:
                 classes.append('crit-bg')
             
-            if style['color']: css.append(f"color:{style['color']}")
+            # CRITICAL FIX: Don't add inline color if crit-bg class is present
+            # This allows CSS to properly override with yellow color
+            if style['color'] and not is_critical_bg: 
+                css.append(f"color:{style['color']}")
+            
             if style['bold']: css.append("font-weight:bold")
             if style['bg']: css.append(f"background-color:{style['bg']}")
             
