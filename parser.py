@@ -25,17 +25,17 @@ CRITICAL_KEYWORDS = [
     # High confidence markers
     'PEASS', '95%', '99%', 'PE vector', 'RED/YELLOW', 'RED:',
     'possible CVE', 'Exploit',
-    
+
     # Specific Dangerous Capabilities (Root equivalents)
-    'cap_dac_override', 
-    'cap_sys_admin', 
-    'cap_sys_ptrace', 
+    'cap_dac_override',
+    'cap_sys_admin',
+    'cap_sys_ptrace',
     'cap_sys_module',
     'cap_chown',
     'cap_fowner',
     'cap_setuid',
     'cap_setgid',
-    
+
     # Specific Critical Configurations
     'nopasswd', 'NOPASSWD',  # Sudo without password
     'git config', # Often contains creds
@@ -64,14 +64,14 @@ class AnsiConverter:
         def get_span_tag(text_content, style):
             css = []
             classes = []
-            
+
             # CRITICAL FIX: Smart detection for critical patterns
             is_critical = False
-            
+
             # Pattern 1: Red background = always critical
             if style['bg'] == '#ff0000':
                 is_critical = True
-            
+
             # Pattern 2: Specific critical keywords
             elif text_content:
                 if any(kw in text_content for kw in ['RED/YELLOW', 'RED:']):
@@ -80,7 +80,7 @@ class AnsiConverter:
                 elif style['bold'] and style['color'] == '#cc0000':
                     if any(kw in text_content for kw in CRITICAL_KEYWORDS):
                         is_critical = True
-            
+
             # Apply critical styling
             if is_critical:
                 classes.append('crit-bg')
@@ -89,15 +89,15 @@ class AnsiConverter:
                 css.append("font-weight:bold")
             else:
                 # Normal processing for non-critical text
-                if style['color']: 
+                if style['color']:
                     css.append(f"color:{style['color']}")
-                if style['bold']: 
+                if style['bold']:
                     css.append("font-weight:bold")
-                if style['bg']: 
+                if style['bg']:
                     css.append(f"background-color:{style['bg']}")
-            
+
             if not css and not classes: return ""
-            
+
             class_attr = f' class="{" ".join(classes)}"' if classes else ''
             style_attr = f' style="{";".join(css)}"' if css else ''
             return f'<span{class_attr}{style_attr}>'
@@ -238,10 +238,38 @@ class PeasParser:
         self.seen_findings = set()
 
     def parse(self):
+        self._strip_initial_banner()
         self._extract_hostname()
         self._extract_sections()
         self._organize_categories()
         self._extract_findings_contextual()
+
+    def _strip_initial_banner(self):
+        """Remove the initial PEAS ASCII logo/banner block from the report output.
+
+        LinPEAS prints an ASCII-art banner and a "Do you like PEASS?" box before the
+        first real section header, and that banner is frequently distorted when
+        rendered as HTML.
+        """
+        lines = self.raw_content.splitlines()
+        header_ansi_pattern = '\x1b[1;32m'
+
+        for i, line in enumerate(lines):
+            clean_line = self.converter.strip(line).strip()
+            is_header = False
+
+            if header_ansi_pattern in line:
+                if any(c in line for c in '╔═══'):
+                    is_header = True
+                elif clean_line.startswith('[+]') or clean_line.startswith('[-]'):
+                    if len(clean_line) < 80 and not clean_line.endswith(':'):
+                        is_header = True
+
+            if is_header:
+                if i > 0:
+                    self.raw_content = "\n".join(lines[i:])
+                    self.clean_content = self.converter.strip(self.raw_content)
+                return
 
     def _extract_hostname(self):
         match = re.search(r'Hostname:\s*([\w\-\.]+)', self.clean_content, re.IGNORECASE)
@@ -332,7 +360,7 @@ class PeasParser:
                     if "Active Internet connections" in clean: continue
                     if "Proto Recv-Q" in clean: continue
                     if "Unknown SUID binary" in clean: continue # Often misclassified
-                    
+
                     level = 'high'
                     found = True
 
@@ -400,7 +428,7 @@ class ReportGenerator:
         for category_name, sections in self.parser.categorized_sections.items():
             if not sections:
                 continue
-            
+
             # FIX: Calculate stats for this category - count SECTIONS not individual findings
             sections_with_crit = 0
             sections_with_high = 0
@@ -409,12 +437,12 @@ class ReportGenerator:
                     findings = self.parser.section_findings[title]
                     has_critical = any(f['level'] == 'critical' for f in findings)
                     has_high = any(f['level'] == 'high' for f in findings)
-                    
+
                     if has_critical:
                         sections_with_crit += 1
                     elif has_high:  # Only count as 'high' if no critical
                         sections_with_high += 1
-            
+
             stats_badge = ""
             if sections_with_crit > 0 or sections_with_high > 0:
                 parts = []
@@ -450,7 +478,7 @@ class ReportGenerator:
                 toc_html.append(f'<li><a href="#{sec_id}"><span class="toc-title">{safe_title}</span>{indicator}</a></li>')
 
                 colored_content = converter.to_html(content)
-                
+
                 content_html.append(f'''
                     <section id="{sec_id}" class="report-section">
                         <div class="section-header">
@@ -568,7 +596,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.3em; }}
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
         pre.content {{ white-space: pre; overflow-x: auto; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
-        
+
         /* Critical background styling - keep it "cell aligned" (no padding/radius) so ASCII art doesn't break */
         .crit-bg {{ color: #ffff00 !important; background-color: #ff0000 !important; font-weight: bold !important; padding: 0 !important; border-radius: 0 !important; }}
 
