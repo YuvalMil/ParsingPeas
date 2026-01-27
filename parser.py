@@ -291,56 +291,136 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript - Production-grade chunked loader
+    # JavaScript with COMPREHENSIVE DEBUGGING
     javascript = f'''
 <script>
+// ============ DEBUG SYSTEM ============
+const DEBUG_MODE = true;
+const debugLog = (msg, data) => {{
+    const log = `[DEBUG] ${{msg}}`;
+    console.log(log, data || '');
+    if (DEBUG_MODE && document.getElementById('debug-console')) {{
+        const div = document.createElement('div');
+        div.textContent = log + (data ? ': ' + JSON.stringify(data).substring(0, 100) : '');
+        document.getElementById('debug-console').appendChild(div);
+    }}
+}};
+
+window.onerror = (msg, url, line, col, error) => {{
+    debugLog('ERROR', {{msg, line, col, error: error?.toString()}});
+    return false;
+}};
+
+debugLog('Script loaded');
+
+// ============ CONSTANTS ============
 const TERMINAL_DATA_FILE = '{chunks_filename}';
 let terminalData = null;
 let currentChunk = 0;
 let isLoading = false;
 let allLoaded = false;
 
+debugLog('Terminal file', TERMINAL_DATA_FILE);
+
+// ============ BASIC FUNCTIONS ============
 function sw(v) {{
-    document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
-    document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
-    
-    if (v === 1 && !terminalData) {{
-        loadTerminalData();
+    try {{
+        debugLog('Switching view to', v);
+        
+        const buttons = document.querySelectorAll('.vb');
+        const views = document.querySelectorAll('.vc');
+        
+        debugLog('Found buttons', buttons.length);
+        debugLog('Found views', views.length);
+        
+        buttons.forEach((b, i) => {{
+            b.classList.toggle('active', i === v);
+        }});
+        
+        views.forEach((c, i) => {{
+            c.classList.toggle('active', i === v);
+        }});
+        
+        debugLog('View switched');
+        
+        if (v === 1 && !terminalData) {{
+            debugLog('Loading terminal data');
+            loadTerminalData();
+        }}
+    }} catch(e) {{
+        debugLog('ERROR in sw()', e.toString());
     }}
 }}
 
+function tog(e) {{
+    try {{
+        let c = e.nextElementSibling;
+        c.style.display = c.style.display === 'none' ? 'block' : 'none';
+        e.innerHTML = (c.style.display === 'none' ? '&gt; ' : 'v ') + e.innerHTML.slice(2);
+    }} catch(e) {{
+        debugLog('ERROR in tog()', e.toString());
+    }}
+}}
+
+function toggleCat(id) {{
+    try {{
+        let cat = document.getElementById('cat-' + id);
+        let title = event.target;
+        cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
+        title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + title.textContent.substring(2);
+    }} catch(e) {{
+        debugLog('ERROR in toggleCat()', e.toString());
+    }}
+}}
+
+function jump(i) {{
+    try {{
+        document.getElementById('s' + i).scrollIntoView({{behavior: 'smooth'}});
+    }} catch(e) {{
+        debugLog('ERROR in jump()', e.toString());
+    }}
+}}
+
+// ============ TERMINAL LOADER ============
 async function loadTerminalData() {{
     const pre = document.getElementById('terminal-pre');
     const status = document.getElementById('term-status');
     const loadBtn = document.getElementById('load-all-btn');
     
     try {{
+        debugLog('Starting terminal load');
         status.textContent = 'Loading terminal data...';
+        
+        debugLog('Fetching', TERMINAL_DATA_FILE);
         const response = await fetch(TERMINAL_DATA_FILE);
+        debugLog('Fetch response', {{ok: response.ok, status: response.status}});
+        
         if (!response.ok) throw new Error('Failed to load: ' + response.status);
         
+        debugLog('Parsing JSON');
         terminalData = await response.json();
-        console.log(`Loaded ${{terminalData.chunks.length}} chunks (${{terminalData.total_lines.toLocaleString()}} lines)`);
+        debugLog('Terminal data loaded', {{chunks: terminalData.chunks.length, lines: terminalData.total_lines}});
         
         // Render first chunk immediately
+        debugLog('Rendering first chunk');
         pre.textContent = terminalData.chunks[0];
         currentChunk = 1;
         
         status.textContent = `Showing 1-${{Math.min(terminalData.chunk_size, terminalData.total_lines)}} of ${{terminalData.total_lines.toLocaleString()}} lines`;
         loadBtn.style.display = terminalData.chunks.length > 1 ? 'inline-block' : 'none';
         
-        // Setup scroll observer
+        debugLog('Terminal ready');
         setupScrollObserver();
     }} catch(e) {{
+        debugLog('ERROR loading terminal', e.toString());
         status.textContent = 'Error: ' + e.message;
-        pre.textContent = 'Failed to load terminal data.\n\nMake sure to open via http:// (not file:///)\nRun: python3 -m http.server 8000';
-        console.error(e);
+        pre.textContent = 'Failed to load terminal data.\n\nError: ' + e.message + '\n\nMake sure to open via http:// (not file:///)\nRun: python3 -m http.server 8000';
     }}
 }}
 
 function setupScrollObserver() {{
+    debugLog('Setting up scroll observer');
     const container = document.getElementById('terminal-content');
-    const pre = document.getElementById('terminal-pre');
     
     container.addEventListener('scroll', () => {{
         if (allLoaded || isLoading) return;
@@ -355,11 +435,11 @@ function setupScrollObserver() {{
 function loadNextChunk() {{
     if (!terminalData || currentChunk >= terminalData.chunks.length || isLoading) return;
     
+    debugLog('Loading chunk', currentChunk);
     isLoading = true;
     const pre = document.getElementById('terminal-pre');
     const status = document.getElementById('term-status');
     
-    // Append next chunk
     pre.textContent += '\n' + terminalData.chunks[currentChunk];
     currentChunk++;
     
@@ -378,6 +458,7 @@ function loadNextChunk() {{
 function loadAllChunks() {{
     if (!terminalData || allLoaded) return;
     
+    debugLog('Loading all chunks');
     const pre = document.getElementById('terminal-pre');
     const status = document.getElementById('term-status');
     const btn = document.getElementById('load-all-btn');
@@ -385,7 +466,6 @@ function loadAllChunks() {{
     btn.textContent = 'Loading...';
     btn.disabled = true;
     
-    // Load remaining chunks
     setTimeout(() => {{
         const remaining = terminalData.chunks.slice(currentChunk);
         pre.textContent += '\n' + remaining.join('\n');
@@ -395,38 +475,33 @@ function loadAllChunks() {{
         
         status.textContent = `All ${{terminalData.total_lines.toLocaleString()}} lines loaded`;
         btn.style.display = 'none';
+        debugLog('All chunks loaded');
     }}, 10);
 }}
 
-function tog(e) {{
-    let c = e.nextElementSibling;
-    c.style.display = c.style.display === 'none' ? 'block' : 'none';
-    e.innerHTML = (c.style.display === 'none' ? '&gt; ' : 'v ') + e.innerHTML.slice(2);
-}}
-
-function toggleCat(id) {{
-    let cat = document.getElementById('cat-' + id);
-    let title = event.target;
-    cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
-    title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + title.textContent.substring(2);
-}}
-
-function jump(i) {{
-    document.getElementById('s' + i).scrollIntoView({{behavior: 'smooth'}});
-}}
-
-document.getElementById('sb').addEventListener('input', e => {{
-    let q = e.target.value.toLowerCase();
-    document.querySelectorAll('.sec').forEach(s => {{
-        s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
+// ============ SEARCH ============
+const searchBox = document.getElementById('sb');
+if (searchBox) {{
+    searchBox.addEventListener('input', e => {{
+        let q = e.target.value.toLowerCase();
+        document.querySelectorAll('.sec').forEach(s => {{
+            s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
+        }});
     }});
+    debugLog('Search box initialized');
+}}
+
+// ============ INITIALIZATION ============
+document.addEventListener('DOMContentLoaded', () => {{
+    debugLog('DOM loaded');
+    debugLog('All systems initialized');
 }});
 
-console.log('ParsingPeas Pro v2.0 loaded!');
+debugLog('ParsingPeas Debug Edition v2.1 loaded');
 </script>
     '''
     
-    # HTML template with chunked terminal UI
+    # HTML template with DEBUG CONSOLE
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -471,11 +546,13 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 #load-all-btn{{background:#00ff00;color:#0a0e27;border:none;padding:8px 16px;border-radius:4px;font:12px 'Courier New',monospace;font-weight:bold;cursor:pointer;transition:all .2s}}
 #load-all-btn:hover{{background:#00cc00;transform:scale(1.05)}}
 #load-all-btn:disabled{{opacity:0.5;cursor:not-allowed}}
+#debug-console{{position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,0.95);color:#0f0;padding:10px;font-size:11px;max-height:150px;overflow-y:auto;border-top:2px solid #0f0;font-family:monospace;z-index:9999}}
+#debug-console div{{margin:2px 0;padding:2px;border-left:3px solid #0f0;padding-left:8px}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 </style></head><body>
-<div class="hdr"><h1>ParsingPeas Report</h1>
+<div class="hdr"><h1>ParsingPeas Report <small style="font-size:0.4em;color:#888">[DEBUG MODE]</small></h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
 <div><button class="vb active" onclick="sw(0)">Parsed</button><button class="vb" onclick="sw(1)">Terminal</button></div>
 <div id="p" class="vc active">
@@ -491,6 +568,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 </div>
 <div class="raw" id="terminal-content"><pre id="terminal-pre"></pre></div>
 </div>
+<div id="debug-console"></div>
 {javascript}
 </body></html>'''
     
@@ -501,7 +579,8 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
         f.write(html)
     
     print(f"\n✅ Report generated: {report_path}")
-    print(f"✅ Terminal data: {chunks_path}\n")
+    print(f"✅ Terminal data: {chunks_path}")
+    print(f"\n🔍 DEBUG MODE ENABLED - Check bottom of page for console logs\n")
     return report_path
 
 
