@@ -19,29 +19,6 @@ from collections import OrderedDict
 # --- Configuration ---
 CHUNK_SIZE = 2000  # Lines per chunk for terminal view loading
 
-# Critical finding keywords for intelligent detection
-# ONLY include high-confidence PE vectors here
-CRITICAL_KEYWORDS = [
-    # High confidence markers
-    'PEASS', '95%', '99%', 'PE vector', 'RED/YELLOW', 'RED:',
-    'possible CVE', 'Exploit',
-
-    # Specific Dangerous Capabilities (Root equivalents)
-    'cap_dac_override',
-    'cap_sys_admin',
-    'cap_sys_ptrace',
-    'cap_sys_module',
-    'cap_chown',
-    'cap_fowner',
-    'cap_setuid',
-    'cap_setgid',
-
-    # Specific Critical Configurations
-    'nopasswd', 'NOPASSWD',  # Sudo without password
-    'git config', # Often contains creds
-    'id_rsa', # Private keys
-]
-
 class AnsiConverter:
     """
     Handles conversion of ANSI codes to HTML for report viewing.
@@ -65,21 +42,13 @@ class AnsiConverter:
             css = []
             classes = []
 
-            # CRITICAL FIX: Smart detection for critical patterns
+            # CRITICAL FIX: Only treat as "Critical" if the ANSI background is RED
+            # This respects LinPEAS's native coloring (Red/Yellow = Critical).
             is_critical = False
 
-            # Pattern 1: Red background = always critical
+            # Pattern 1: Red background = Critical (LinPEAS Standard)
             if style['bg'] == '#ff0000':
                 is_critical = True
-
-            # Pattern 2: Specific critical keywords
-            elif text_content:
-                if any(kw in text_content for kw in ['RED/YELLOW', 'RED:']):
-                    is_critical = True
-                # Pattern 3: Bold red text ONLY if it contains LinPEAS critical indicators
-                elif style['bold'] and style['color'] == '#cc0000':
-                    if any(kw in text_content for kw in CRITICAL_KEYWORDS):
-                        is_critical = True
 
             # Apply critical styling
             if is_critical:
