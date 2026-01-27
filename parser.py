@@ -266,7 +266,7 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript - USE RAW STRING to prevent \n interpretation
+    # JavaScript - SIMPLIFIED terminal rendering
     javascript = r'''
 <script>
 let terminalLoaded = false;
@@ -289,7 +289,12 @@ function sw(v) {
                 }
                 const rawData = atob(rawDataBase64);
                 console.log('Decoded length:', rawData.length);
-                terminal.innerHTML = convertAnsiToHtml(rawData);
+                
+                // Simple approach: strip ANSI, escape HTML, wrap in pre
+                let clean = rawData.replace(/\x1B\[[0-9;]*m/g, '');
+                clean = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                terminal.innerHTML = '<pre style="color:#50fa7b;margin:0;white-space:pre-wrap;word-wrap:break-word">' + clean + '</pre>';
+                
                 terminalLoaded = true;
                 console.log('Terminal loaded!');
             } catch(e) {
@@ -298,40 +303,6 @@ function sw(v) {
             }
         }, 100);
     }
-}
-
-function convertAnsiToHtml(text) {
-    const lines = text.split('\n');
-    const result = [];
-    
-    for (let line of lines) {
-        let processed = line;
-        
-        processed = processed.replace(/\x1B\[1;31m/g, '<span style="color:#ff6b6b;font-weight:bold">');
-        processed = processed.replace(/\x1B\[1;32m/g, '<span style="color:#50fa7b;font-weight:bold">');
-        processed = processed.replace(/\x1B\[1;33m/g, '<span style="color:#f1fa8c;font-weight:bold">');
-        processed = processed.replace(/\x1B\[1;34m/g, '<span style="color:#8be9fd;font-weight:bold">');
-        processed = processed.replace(/\x1B\[1;35m/g, '<span style="color:#ff79c6;font-weight:bold">');
-        processed = processed.replace(/\x1B\[1;36m/g, '<span style="color:#8be9fd;font-weight:bold">');
-        processed = processed.replace(/\x1B\[31m/g, '<span style="color:#ff5555">');
-        processed = processed.replace(/\x1B\[32m/g, '<span style="color:#50fa7b">');
-        processed = processed.replace(/\x1B\[33m/g, '<span style="color:#f1fa8c">');
-        processed = processed.replace(/\x1B\[34m/g, '<span style="color:#8be9fd">');
-        processed = processed.replace(/\x1B\[35m/g, '<span style="color:#ff79c6">');
-        processed = processed.replace(/\x1B\[36m/g, '<span style="color:#8be9fd">');
-        processed = processed.replace(/\x1B\[37m/g, '<span style="color:#f8f8f2">');
-        processed = processed.replace(/\x1B\[0m/g, '</span>');
-        processed = processed.replace(/\x1B\[m/g, '</span>');
-        processed = processed.replace(/\x1B\[[0-9;]*m/g, '');
-        
-        processed = processed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        processed = processed.replace(/&lt;span/g, '<span').replace(/&lt;\/span&gt;/g, '</span>');
-        processed = processed.replace(/style=&quot;([^&]+?)&quot;&gt;/g, 'style="$1">');
-        
-        result.push(processed + '<br>');
-    }
-    
-    return result.join('\n');
 }
 
 function tog(e) {
