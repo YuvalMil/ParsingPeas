@@ -6,6 +6,8 @@ Parses linpeas/winpeas output and generates interactive HTML reports
 
 import os
 import re
+import json
+import base64
 from datetime import datetime
 from html import escape
 from collections import OrderedDict
@@ -21,7 +23,6 @@ def extract_hostname(content):
     """Extract hostname from linpeas output"""
     clean = strip_ansi_codes(content)
     
-    # Try multiple patterns
     patterns = [
         r'Hostname:\s*([\w\-\.]+)',
         r'hostname=([\w\-\.]+)',
@@ -215,7 +216,6 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
         with open(filepath, 'rb') as f:
             raw_content = f.read().decode('utf-8', errors='ignore')
     
-    # Extract hostname if not provided
     if not hostname:
         print("\U0001f310 Extracting hostname...")
         hostname = extract_hostname(raw_content)
@@ -237,8 +237,9 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    print("\n\U0001f4bb Generating views...")
-    terminal_html = convert_ansi_to_html_colors(raw_content, for_terminal=True)
+    print("\n\U0001f4be Preparing terminal data (lazy-load)...")
+    # Store raw content for lazy loading - escape for JavaScript string
+    raw_escaped = raw_content.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '')
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -266,46 +267,94 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript
-    javascript = """
+    # Limit raw data size (first 500KB)
+    if len(raw_escaped) > 500000:
+        raw_escaped = raw_escaped[:500000] + '\\n\\n[... Output truncated at 500KB for performance ...]'
+    
+    # JavaScript with lazy terminal loading
+    javascript = f'''
 <script>
-function sw(v) {
+let terminalLoaded = false;
+const rawData = "{raw_escaped}";
+
+function sw(v) {{
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
     document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
-}
+    
+    if (v === 1 && !terminalLoaded) {{
+        console.log('Loading terminal view...');
+        const terminal = document.getElementById('terminal-content');
+        terminal.innerHTML = '<p style="color:#f1fa8c;padding:20px">Processing terminal view...</p>';
+        
+        setTimeout(() => {{
+            terminal.innerHTML = convertAnsiToHtml(rawData);
+            terminalLoaded = true;
+            console.log('Terminal loaded!');
+        }}, 100);
+    }}
+}}
 
-function tog(e) {
+function convertAnsiToHtml(text) {{
+    const lines = text.split('\\n');
+    const result = [];
+    
+    for (let line of lines) {{
+        let processed = line;
+        
+        // Basic ANSI color mapping
+        processed = processed.replace(/\x1B\[1;31m/g, '<span style="color:#ff6b6b;font-weight:bold">');
+        processed = processed.replace(/\x1B\[1;32m/g, '<span style="color:#50fa7b;font-weight:bold">');
+        processed = processed.replace(/\x1B\[1;33m/g, '<span style="color:#f1fa8c;font-weight:bold">');
+        processed = processed.replace(/\x1B\[31m/g, '<span style="color:#ff5555">');
+        processed = processed.replace(/\x1B\[32m/g, '<span style="color:#50fa7b">');
+        processed = processed.replace(/\x1B\[33m/g, '<span style="color:#f1fa8c">');
+        processed = processed.replace(/\x1B\[0m/g, '</span>');
+        processed = processed.replace(/\x1B\[m/g, '</span>');
+        processed = processed.replace(/\x1B\[[0-9;]*m/g, '');
+        
+        // Escape HTML
+        processed = processed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        processed = processed.replace(/&lt;span/g, '<span').replace(/&lt;\\/span&gt;/g, '</span>');
+        processed = processed.replace(/style=&quot;([^&]+?)&quot;&gt;/g, 'style="$1">');
+        
+        result.push(processed + '<br>');
+    }}
+    
+    return result.join('\\n');
+}}
+
+function tog(e) {{
     let c = e.nextElementSibling;
     c.style.display = c.style.display === 'none' ? 'block' : 'none';
     e.innerHTML = c.style.display === 'none' ? '&gt; ' + e.innerHTML.slice(5) : 'v ' + e.innerHTML.slice(5);
-}
+}}
 
-function toggleCat(id) {
+function toggleCat(id) {{
     let cat = document.getElementById('cat-' + id);
     let title = event.target;
     cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
     let txt = title.textContent;
     title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + txt.substring(2);
-}
+}}
 
-function jump(i) {
+function jump(i) {{
     let s = document.getElementById('s' + i);
-    s.scrollIntoView({behavior: 'smooth'});
+    s.scrollIntoView({{behavior: 'smooth'}});
     let t = s.querySelector('.st');
     let c = s.querySelector('.sc');
     if (c.style.display === 'none') tog(t);
-}
+}}
 
-document.getElementById('sb').addEventListener('input', e => {
+document.getElementById('sb').addEventListener('input', e => {{
     let q = e.target.value.toLowerCase();
-    document.querySelectorAll('.sec').forEach(s => {
+    document.querySelectorAll('.sec').forEach(s => {{
         s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
-    });
-});
+    }});
+}});
 
-console.log('ParsingPeas loaded!');
+console.log('ParsingPeas loaded! Click Terminal tab to view raw output.');
 </script>
-    """
+    '''
     
     # HTML template
     html = f'''<!DOCTYPE html>
@@ -360,7 +409,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 <div class="hl"><h2>Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw">{terminal_html}</div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><p style="color:#f1fa8c;padding:20px">Click Terminal button above to load raw output</p></div></div>
 {javascript}
 </body></html>'''
     
