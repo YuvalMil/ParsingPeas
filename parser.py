@@ -39,11 +39,21 @@ class AnsiConverter:
 
         def get_span_tag(style):
             css = []
+            classes = []
+            
+            # Add explicit class for red backgrounds (critical findings)
+            if style['bg'] == '#ff0000':
+                classes.append('crit-bg')
+            
             if style['color']: css.append(f"color:{style['color']}")
             if style['bold']: css.append("font-weight:bold")
             if style['bg']: css.append(f"background-color:{style['bg']}")
-            if not css: return ""
-            return f'<span style="{";".join(css)}">'
+            
+            if not css and not classes: return ""
+            
+            class_attr = f' class="{" ".join(classes)}"' if classes else ''
+            style_attr = f' style="{";".join(css)}"' if css else ''
+            return f'<span{class_attr}{style_attr}>'
 
         if parts[0]:
             result.append(html.escape(parts[0]))
@@ -504,8 +514,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.3em; }}
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
         pre.content {{ white-space: pre-wrap; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.5; }}
-        /* Enhance visibility for bold white on red (critical findings in body) */
-        pre.content span[style*='background-color:#ff0000'] {{ color: #fff !important; font-weight: bold; padding: 2px 4px; border-radius: 2px; }}
+        
+        /* Critical background styling - use class-based targeting */
+        .crit-bg {{ color: #ffff00 !important; background-color: #ff0000 !important; font-weight: bold !important; padding: 2px 4px; border-radius: 2px; }}
 
         #terminal-view {{ background: #000; padding: 20px; }}
         #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; }}
