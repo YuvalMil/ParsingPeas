@@ -325,11 +325,30 @@ class ReportGenerator:
         for category_name, sections in self.parser.categorized_sections.items():
             if not sections:
                 continue
+            
+            # Calculate stats for this category
+            cat_crit = 0
+            cat_high = 0
+            for title in sections.keys():
+                if title in self.parser.section_findings:
+                    findings = self.parser.section_findings[title]
+                    cat_crit += sum(1 for f in findings if f['level'] == 'critical')
+                    cat_high += sum(1 for f in findings if f['level'] == 'high')
+            
+            stats_badge = ""
+            if cat_crit > 0 or cat_high > 0:
+                parts = []
+                if cat_crit > 0: parts.append(f"<span class='stat-crit'>{cat_crit}C</span>")
+                if cat_high > 0: parts.append(f"<span class='stat-high'>{cat_high}H</span>")
+                stats_badge = f"<span class='cat-stats'>{' '.join(parts)}</span>"
 
             toc_html.append(f'''
             <li class="category-group">
                 <details open>
-                    <summary>{html.escape(category_name)} <span class="count">{len(sections)}</span></summary>
+                    <summary>
+                        <span>{html.escape(category_name)} <span class="count">{len(sections)}</span></span>
+                        {stats_badge}
+                    </summary>
                     <ul>
             ''')
 
@@ -344,9 +363,9 @@ class ReportGenerator:
                     findings = self.parser.section_findings[title]
                     has_critical = any(f['level'] == 'critical' for f in findings)
                     if has_critical:
-                        indicator = '<span class="toc-finding-dot critical"></span>'
+                        indicator = f'<span class="toc-finding-dot critical" onclick="toggleRead(this, event)" title="Click to mark read"></span>'
                     else:
-                        indicator = '<span class="toc-finding-dot high"></span>'
+                        indicator = f'<span class="toc-finding-dot high" onclick="toggleRead(this, event)" title="Click to mark read"></span>'
 
                 toc_html.append(f'<li><a href="#{sec_id}">{safe_title} {indicator}</a></li>')
 
@@ -432,10 +451,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         details[open] summary {{ color: var(--accent); }}
         details li a {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
         details li a:hover {{ color: white; background: rgba(255,255,255,0.05); }}
-        .toc-finding-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; }}
+        .toc-finding-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; cursor: pointer; transition: opacity 0.2s; }}
+        .toc-finding-dot:hover {{ transform: scale(1.2); }}
         .toc-finding-dot.high {{ background: var(--high-fg); box-shadow: 0 0 5px var(--high-fg); }}
         .toc-finding-dot.critical {{ background: var(--critical-bg); border: 2px solid var(--critical-fg); box-shadow: 0 0 5px var(--critical-bg); width: 8px; height: 8px; }}
-        .count {{ font-size: 0.8em; opacity: 0.5; font-weight: normal; background: #333; padding: 2px 6px; border-radius: 10px; }}
+        .toc-finding-dot.read {{ background: #444 !important; border-color: #444 !important; box-shadow: none !important; opacity: 0.5; }}
+
+        .cat-stats {{ font-size: 0.8em; display: flex; gap: 5px; }}
+        .stat-crit {{ color: var(--critical-fg); background: var(--critical-bg); padding: 1px 4px; border-radius: 3px; font-weight: bold; }}
+        .stat-high {{ color: #000; background: var(--high-fg); padding: 1px 4px; border-radius: 3px; font-weight: bold; }}
+
+        .count {{ font-size: 0.8em; opacity: 0.5; font-weight: normal; background: #333; padding: 2px 6px; border-radius: 10px; margin-left: 5px; }}
         main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; }}
         header {{ padding: 15px 30px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }}
         .tabs button {{ background: transparent; border: none; color: #888; padding: 8px 16px; cursor: pointer; font-size: 1em; border-radius: 4px; transition: 0.2s; font-weight: bold; }}
@@ -548,6 +574,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         document.getElementById('terminal-view').addEventListener('scroll', (e) => {{
             if (e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight < 400) {{ renderNextChunk(); }}
         }});
+        
+        // --- Toggle Read Status ---
+        function toggleRead(el, event) {{
+            event.preventDefault();
+            event.stopPropagation();
+            el.classList.toggle('read');
+            // Basic persistence simulation (in a real app, save to localStorage)
+        }}
     </script>
 </body>
 </html>
