@@ -369,7 +369,9 @@ class ReportGenerator:
 
                 toc_html.append(f'<li><a href="#{sec_id}">{safe_title} {indicator}</a></li>')
 
+                # Ensure critical text is red in content
                 colored_content = converter.to_html(content)
+                
                 content_html.append(f'''
                     <section id="{sec_id}" class="report-section">
                         <div class="section-header">
@@ -486,6 +488,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.3em; }}
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
         pre.content {{ white-space: pre-wrap; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; }}
+        /* Force Critical Colors in Body */
+        span[style*='background-color:#ff0000'] {{ color: #ffff00 !important; font-weight: bold; padding: 2px 4px; border-radius: 2px; }}
+
         #terminal-view {{ background: #000; padding: 20px; }}
         #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; }}
         #loading {{ position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: #000; padding: 10px 20px; border-radius: 20px; font-weight: bold; display: none; }}
@@ -574,7 +579,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         document.getElementById('terminal-view').addEventListener('scroll', (e) => {{
             if (e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight < 400) {{ renderNextChunk(); }}
         }});
-        
         // --- Toggle Read Status ---
         function toggleRead(el, event) {{
             event.preventDefault();
