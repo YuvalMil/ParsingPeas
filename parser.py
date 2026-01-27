@@ -13,6 +13,7 @@ import html
 import argparse
 from datetime import datetime
 from pathlib import Path
+from collections import OrderedDict
 
 # --- Configuration ---
 CHUNK_SIZE = 2000  # Lines per chunk for terminal view loading
@@ -83,18 +84,6 @@ class AnsiConverter:
                     current_style['color'] = None # Default FG
                 elif code == '49':
                     current_style['bg'] = None # Default BG
-                
-                # Handle extended colors like 1;31 (already split by ;)
-                # The logic above handles '1' then '31' sequentially, which works perfectly.
-
-            # If there is a current style, wrap the text segment
-            # We close the previous span (if any) implicitly by just outputting the new span
-            # Actually, to generate valid HTML, we should close the previous span *if* we were inside one.
-            # But the simplest robust way is: 
-            # 1. Close previous span (always)
-            # 2. Open new span with current state
-            # 3. Append text
-            # Optimization: Only do this if text_segment is not empty
             
             if text_segment:
                 span = get_span_tag(current_style)
@@ -109,6 +98,60 @@ class AnsiConverter:
         """Removes all ANSI codes for plain text analysis."""
         return re.sub(r'\x1b\[[\d;]*[a-zA-Z]', '', text)
 
+
+class CategoryManager:
+    """Manages the categorization of checks for both LinPEAS and WinPEAS."""
+    
+    # Define standardized categories and their keywords
+    # Order matters: first match wins
+    CATEGORIES = {
+        "System Information": [
+            "Basic information", "System Information", "OS Information", "Environment", 
+            "Operative system", "Sudo version", "Hostname", "CPU", "Env"
+        ],
+        "Network Information": [
+            "Network Information", "Interfaces", "Ports", "Listening", "Routes", "DNS", 
+            "Hosts", "ARP", "Netstat", "Shares"
+        ],
+        "User Information": [
+            "User Information", "Users & Groups", "Password Policy", "Logon Sessions", 
+            "Clipboard", "LSA Secrets", "SAM", "Home folders", "Superusers", "Privileges"
+        ],
+        "Processes & Services": [
+            "Processes Information", "Processes & Cron", "Services Information", 
+            "Systemd", "Cron", "Scheduled Tasks", "Autoruns", "Running Processes", 
+            "Binary processes"
+        ],
+        "Software & Containers": [
+            "Software Information", "Installed Software", "Compiler", "Container", 
+            "Docker", "Kubernetes", "Cloud", "AWS", "GCP", "Azure", "LXC", "Useful Software"
+        ],
+        "Files & Registry": [
+            "File Information", "Interesting Files", "Registry Information", 
+            "Writable Files", "Capabilities", "SUID", "SGID", "Permission", "Mounts"
+        ],
+        "Credentials & Secrets": [
+            "Searching passwords", "Credentials", "API Keys", "Passwords", "Identities", 
+            "SSH Keys", "History Files", "Browser", "Mails"
+        ],
+        "Vulnerabilities & Exploits": [
+            "Exploits", "CVE", "Vulnerability", "Probes"
+        ]
+    }
+
+    @classmethod
+    def get_category(cls, section_title):
+        """Returns the best-fit category for a given section title."""
+        title_lower = section_title.lower()
+        
+        for category, keywords in cls.CATEGORIES.items():
+            for keyword in keywords:
+                if keyword.lower() in title_lower:
+                    return category
+                    
+        return "Other Checks"
+
+
 class PeasParser:
     """Parses Linpeas/Winpeas output into structured data."""
     
@@ -116,7 +159,8 @@ class PeasParser:
         self.raw_content = content
         self.converter = AnsiConverter()
         self.clean_content = self.converter.strip(content)
-        self.sections = {}
+        self.sections = OrderedDict() # Title -> Content
+        self.categorized_sections = OrderedDict() # Category -> {Title -> Content}
         self.findings = []
         self.hostname = "unknown"
 
@@ -124,6 +168,7 @@ class PeasParser:
         """Main parsing execution flow."""
         self._extract_hostname()
         self._extract_sections()
+        self._organize_categories()
         self._extract_findings()
 
     def _extract_hostname(self):
@@ -132,81 +177,80 @@ class PeasParser:
         if match:
             self.hostname = match.group(1).strip()
         elif "hostname" in self.clean_content.lower():
-             # Fallback: try to find simple hostname line
              for line in self.clean_content.splitlines():
                  if line.lower().startswith("hostname:"):
                      self.hostname = line.split(":", 1)[1].strip()
                      break
 
     def _extract_sections(self):
-        """
-        Splits content into sections. 
-        Uses a heuristic based on PEAS output structure (colored headers).
-        """
+        """Splits content into raw sections based on headers."""
         lines = self.raw_content.splitlines()
         current_header = "General Information"
         buffer = []
         
-        # Regex to identify the start of a main section (often colored bold green)
-        # We look for the raw ANSI because strip() loses that context
+        # Regex to identify headers (Green + Bold)
         header_ansi_pattern = '\x1b[1;32m' 
         
         for line in lines:
             clean_line = self.converter.strip(line).strip()
             
-            # Check if this line looks like a major header
-            # PEAS headers are often formatted like " [ + ] Section Name " or with box chars
             is_header = False
             if header_ansi_pattern in line:
                  if any(c in line for c in '╔════'): # WinPEAS/LinPEAS box style
                      is_header = True
                  elif clean_line.startswith('[+]') or clean_line.startswith('[-]'):
-                     # Sometimes headers are simpler
                      if len(clean_line) < 80 and not clean_line.endswith(':'): 
-                        # Arbitrary length heuristic to distinguish headers from list items
-                        pass 
+                        is_header = True
 
             if is_header:
-                # Save previous section if it has content
                 if buffer:
-                    self.sections[current_header] = self.sections.get(current_header, "") + "\n".join(buffer)
+                    # Save previous section
+                    if current_header in self.sections:
+                        self.sections[current_header] += "\n" + "\n".join(buffer)
+                    else:
+                        self.sections[current_header] = "\n".join(buffer)
                     buffer = []
                 
-                # Extract new title
+                # Clean title
                 title = clean_line.translate(str.maketrans('', '', '╔╗╚╝║═[]+-')).strip()
                 if title:
                     current_header = title
-                
-                # We don't add the header line itself to the buffer to keep sections clean?
-                # Actually, keep it for context in the view
                 buffer.append(line)
             else:
                 buffer.append(line)
         
-        # Flush the last section
         if buffer:
-            self.sections[current_header] = self.sections.get(current_header, "") + "\n".join(buffer)
+            if current_header in self.sections:
+                self.sections[current_header] += "\n" + "\n".join(buffer)
+            else:
+                self.sections[current_header] = "\n".join(buffer)
+
+    def _organize_categories(self):
+        """Groups extracted sections into standard categories."""
+        # Initialize standard categories in order
+        for cat in CategoryManager.CATEGORIES.keys():
+            self.categorized_sections[cat] = OrderedDict()
+        self.categorized_sections["Other Checks"] = OrderedDict()
+
+        for title, content in self.sections.items():
+            category = CategoryManager.get_category(title)
+            self.categorized_sections[category][title] = content
 
     def _extract_findings(self):
-        """
-        Identifies critical findings based on PEAS color coding conventions.
-        Red/Yellow = Critical (95%+ confidence)
-        Red = High
-        """
+        """Identifies critical findings based on PEAS color coding."""
         for line in self.raw_content.splitlines():
-            # PEAS uses specific ANSI combos for findings
-            # Red/Yellow text often indicates Critical
+            # Red/Yellow = Critical
             if '1;31;103m' in line or '1;37;41m' in line: 
                 clean = self.converter.strip(line).strip()
-                if clean and len(clean) < 300: # Filter out massive dumps
+                if clean and len(clean) < 300: 
                     self.findings.append({'level': 'critical', 'text': clean})
             
-            # Red text often indicates High/Vulnerable
+            # Red = High
             elif '1;31m' in line: 
                 clean = self.converter.strip(line).strip()
-                # Filter out headers that might be red
                 if clean and len(clean) < 300 and "Scan" not in clean:
                     self.findings.append({'level': 'high', 'text': clean})
+
 
 class ReportGenerator:
     """Generates the final HTML and JSON artifacts."""
@@ -217,16 +261,11 @@ class ReportGenerator:
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
     def generate(self):
-        """Orchestrates generation of JSON data and HTML report."""
-        # 1. Save Raw JSON for Terminal View (Safe separation of data)
-        # We pre-convert ANSI for the terminal view JSON so the browser just renders HTML
         terminal_json_name = f"terminal_{self.parser.hostname}_{self.timestamp}.json"
         self._save_terminal_data(terminal_json_name)
         
-        # 2. Build HTML embedding the reference to the JSON
         html_content = self._build_html(terminal_json_name)
         
-        # 3. Save HTML
         report_name = f"report_{self.parser.hostname}_{self.timestamp}.html"
         with open(self.output_dir / report_name, 'w', encoding='utf-8') as f:
             f.write(html_content)
@@ -234,16 +273,8 @@ class ReportGenerator:
         return report_name
 
     def _save_terminal_data(self, filename):
-        """
-        Chunks output and saves as valid JSON.
-        Crucially, it runs the ANSI conversion HERE so the browser gets ready-to-render HTML.
-        """
         lines = self.parser.raw_content.splitlines()
-        
-        # Convert each line to HTML-safe ANSI
-        # We join them into chunks to keep file size manageable but reduce request count
         converted_lines = [self.parser.converter.to_html(line) for line in lines]
-        
         chunks = ['\n'.join(converted_lines[i:i+CHUNK_SIZE]) for i in range(0, len(converted_lines), CHUNK_SIZE)]
         
         data = {
@@ -260,31 +291,38 @@ class ReportGenerator:
             json.dump(data, f)
 
     def _build_html(self, json_file):
-        """Constructs the single-page HTML application."""
         toc_html = []
         content_html = []
-        
         converter = AnsiConverter()
         
         idx = 0
-        for title, content in self.parser.sections.items():
-            # Skip empty default sections if they gathered no data
-            if not content.strip(): continue
+        
+        # Iterate through categories
+        for category_name, sections in self.parser.categorized_sections.items():
+            if not sections: continue
             
-            safe_title = html.escape(title)
-            toc_html.append(f'<li><a href="#s{idx}">{safe_title}</a></li>')
+            # Add Category Header to TOC
+            toc_html.append(f'<li class="toc-category">{html.escape(category_name)}</li>')
             
-            # Convert ANSI to HTML for the "Parsed" view
-            colored_content = converter.to_html(content)
-            content_html.append(f'''
-                <section id="s{idx}" class="report-section">
-                    <h3>{safe_title}</h3>
-                    <pre class="content">{colored_content}</pre>
-                </section>
-            ''')
-            idx += 1
+            # Add Sections
+            for title, content in sections.items():
+                if not content.strip(): continue
+                
+                safe_title = html.escape(title)
+                toc_html.append(f'<li class="toc-item"><a href="#s{idx}">{safe_title}</a></li>')
+                
+                colored_content = converter.to_html(content)
+                content_html.append(f'''
+                    <section id="s{idx}" class="report-section">
+                        <div class="section-header">
+                            <span class="section-category">{category_name}</span>
+                            <h3>{safe_title}</h3>
+                        </div>
+                        <pre class="content">{colored_content}</pre>
+                    </section>
+                ''')
+                idx += 1
 
-        # Render Findings
         findings_html = []
         if not self.parser.findings:
              findings_html.append('<div class="finding">No critical findings automatically detected.</div>')
@@ -312,16 +350,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         :root {{ --bg: #0f0f12; --text: #e0e0e0; --accent: #00ff00; --panel: #1a1a1f; --border: #333; }}
         body {{ background: var(--bg); color: var(--text); font-family: 'Consolas', 'Monaco', monospace; margin: 0; display: flex; height: 100vh; overflow: hidden; }}
         
-        /* Sidebar Navigation */
-        aside {{ width: 280px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }}
+        aside {{ width: 300px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }}
         .brand {{ padding: 20px; font-size: 1.4em; color: var(--accent); font-weight: bold; border-bottom: 1px solid var(--border); letter-spacing: 1px; }}
         nav {{ flex: 1; overflow-y: auto; padding: 10px; scrollbar-width: thin; }}
         nav ul {{ list-style: none; padding: 0; margin: 0; }}
-        nav li a {{ display: block; padding: 10px 12px; color: #888; text-decoration: none; border-radius: 4px; transition: 0.2s; font-size: 0.9em; border-left: 2px solid transparent; }}
-        nav li a:hover {{ color: white; background: #25252b; }}
-        nav li a.active {{ color: var(--accent); background: rgba(0,255,0,0.05); border-left-color: var(--accent); }}
         
-        /* Main Content Area */
+        /* TOC Categories */
+        .toc-category {{ color: #fff; font-weight: bold; margin-top: 15px; margin-bottom: 5px; padding: 5px 12px; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #333; opacity: 0.7; }}
+        .toc-item a {{ display: block; padding: 8px 12px 8px 20px; color: #888; text-decoration: none; border-radius: 4px; transition: 0.2s; font-size: 0.9em; border-left: 2px solid transparent; }}
+        .toc-item a:hover {{ color: white; background: #25252b; }}
+        .toc-item a.active {{ color: var(--accent); background: rgba(0,255,0,0.05); border-left-color: var(--accent); }}
+        
         main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }}
         header {{ padding: 15px 30px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }}
         
@@ -332,29 +371,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         .meta-info {{ font-size: 0.85em; color: #666; }}
         
-        /* Views */
         .view {{ display: none; flex: 1; overflow-y: auto; padding: 30px; scroll-behavior: smooth; position: relative; }}
         .view.active {{ display: block; }}
         
-        /* Report View Styling */
         .report-section {{ margin-bottom: 40px; background: var(--panel); padding: 20px; border-radius: 8px; border: 1px solid var(--border); }}
-        .report-section h3 {{ color: var(--accent); margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 15px; font-size: 1.2em; }}
+        .section-header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 15px; }}
+        .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.2em; }}
+        .section-category {{ font-size: 0.75em; background: #333; padding: 4px 8px; border-radius: 4px; color: #ccc; }}
+        
         pre.content {{ white-space: pre-wrap; word-wrap: break-word; margin: 0; font-size: 0.9em; line-height: 1.5; color: #d0d0d0; }}
         
-        /* Findings Styling */
         #findings {{ margin-bottom: 30px; display: grid; gap: 10px; }}
         .finding {{ padding: 12px 15px; border-radius: 6px; background: #25252b; border-left: 4px solid #888; font-size: 0.9em; }}
         .finding.critical {{ border-left-color: #ff5555; background: rgba(255, 85, 85, 0.08); color: #ffcccc; }}
         .finding.high {{ border-left-color: #ffb86c; background: rgba(255, 184, 108, 0.08); color: #ffe6cc; }}
         
-        /* Terminal View Styling */
         #terminal-view {{ background: #000; color: #ccc; padding: 20px; font-family: 'Consolas', monospace; }}
         #term-content {{ font-size: 0.85em; line-height: 1.2; white-space: pre-wrap; word-break: break-all; }}
         
         #loading {{ position: absolute; bottom: 30px; right: 30px; background: var(--accent); color: var(--bg); padding: 8px 16px; border-radius: 4px; font-weight: bold; display: none; box-shadow: 0 4px 12px rgba(0,255,0,0.3); animation: pulse 1.5s infinite; }}
         @keyframes pulse {{ 0% {{ opacity: 0.8; }} 50% {{ opacity: 1; transform: scale(1.05); }} 100% {{ opacity: 0.8; }} }}
         
-        /* Scrollbars */
         ::-webkit-scrollbar {{ width: 10px; }}
         ::-webkit-scrollbar-track {{ background: var(--bg); }}
         ::-webkit-scrollbar-thumb {{ background: #333; border-radius: 5px; }}
@@ -405,13 +442,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let nextChunkIdx = 0;
         
         function switchView(viewName) {{
-            // Toggle Tabs
             document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tabs button').forEach(el => el.classList.remove('active'));
-            
             document.getElementById(viewName + '-view').classList.add('active');
             
-            // Highlight button
             const btns = document.querySelectorAll('.tabs button');
             if (viewName === 'report') btns[0].classList.add('active');
             else btns[1].classList.add('active');
@@ -432,12 +466,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const data = await res.json();
                 chunks = data.chunks;
                 terminalLoaded = true;
-                
-                // Initial render
                 renderNextChunk();
                 
             }} catch (e) {{
-                document.getElementById('term-content').innerText = "Failed to load terminal data: " + e + "\\n\\nEnsure you are opening this via a web server (http://), not local file (file://).";
+                document.getElementById('term-content').innerText = "Failed to load terminal data: " + e + "\\n\\nEnsure you are opening this via a web server.";
             }} finally {{
                 loader.style.display = 'none';
             }}
@@ -445,25 +477,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         function renderNextChunk() {{
             if (nextChunkIdx >= chunks.length) return;
-            
             const pre = document.getElementById('term-content');
-            
-            // SECURITY NOTE: We are using innerHTML here because the content has been 
-            // properly HTML-escaped by the Python AnsiConverter before being saved to JSON.
-            // This is required to render the <span style="..."> tags for colors.
-            // The logic guarantees that only our own <span> tags and escaped text exist.
             pre.innerHTML += chunks[nextChunkIdx] + "\\n"; 
             nextChunkIdx++;
-            
-            // If there's more, show loader briefly if scrolling fast? 
-            // For now, infinite scroll handles it.
         }}
         
-        // Infinite scroll for terminal
         const termView = document.getElementById('terminal-view');
         termView.addEventListener('scroll', (e) => {{
             const el = e.target;
-            // Load more when close to bottom
             if (el.scrollHeight - el.scrollTop - el.clientHeight < 400) {{
                 renderNextChunk();
             }}
@@ -476,7 +497,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 def main():
     if len(sys.argv) < 2:
         print("Usage: parser.py <input_file>")
-        print("Example: parser.py linpeas.txt")
         sys.exit(1)
         
     input_file = sys.argv[1]
@@ -487,7 +507,6 @@ def main():
         
     print(f"[*] Parsing {input_file}...")
     try:
-        # Read with flexible encoding handling
         with open(input_file, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
             
