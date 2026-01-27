@@ -266,8 +266,8 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript - reads from textarea
-    javascript = '''
+    # JavaScript - USE RAW STRING to prevent \n interpretation
+    javascript = r'''
 <script>
 let terminalLoaded = false;
 
@@ -320,7 +320,7 @@ function convertAnsiToHtml(text) {
         processed = processed.replace(/\x1B\[[0-9;]*m/g, '');
         
         processed = processed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        processed = processed.replace(/&lt;span/g, '<span').replace(/&lt;\\/span&gt;/g, '</span>');
+        processed = processed.replace(/&lt;span/g, '<span').replace(/&lt;\/span&gt;/g, '</span>');
         processed = processed.replace(/style=&quot;([^&]+?)&quot;&gt;/g, 'style="$1">');
         
         result.push(processed + '<br>');
