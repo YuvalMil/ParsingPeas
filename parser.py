@@ -196,7 +196,7 @@ def extract_critical_findings(content):
         for pattern, severity in patterns:
             if re.search(pattern, line, re.IGNORECASE):
                 if line not in seen and len(line) < 300:
-                    findings.append({{'severity': severity, 'content': line}})
+                    findings.append({'severity': severity, 'content': line})
                     seen.add(line)
                 break
     
@@ -206,7 +206,7 @@ def extract_critical_findings(content):
 def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     """Generate interactive HTML report"""
     
-    print(f"\n🔹 Parsing {{filepath}}...\n")
+    print(f"\n\U0001f539 Parsing {filepath}...\n")
     
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -216,31 +216,31 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
             raw_content = f.read().decode('utf-8', errors='ignore')
     
     if not hostname:
-        print("🌐 Extracting hostname...")
+        print("\U0001f310 Extracting hostname...")
         hostname = extract_hostname(raw_content)
-        print(f"  Hostname: {{hostname}}")
+        print(f"  Hostname: {hostname}")
     
-    print("\n🔍 Detecting sections...")
+    print("\n\U0001f50d Detecting sections...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
     
     if not sections:
-        print("⚠️  WARNING: No sections found!")
+        print("\u26a0\ufe0f  WARNING: No sections found!")
         return None
     
-    print("\n📁 Organizing into categories...")
+    print("\n\U0001f4c1 Organizing into categories...")
     categories = categorize_sections(sections)
     for cat_name, cat_sections in categories.items():
-        print(f"  {{cat_name}}: {{len(cat_sections)}} sections")
+        print(f"  {cat_name}: {len(cat_sections)} sections")
     
-    print("\n⚠️  Extracting critical findings...")
+    print("\n\u26a0\ufe0f  Extracting critical findings...")
     findings = extract_critical_findings(raw_content)
-    print(f"  Found {{len(findings)}} critical findings")
+    print(f"  Found {len(findings)} critical findings")
     
     # Process terminal data: strip ANSI and chunk it
     timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
     os.makedirs('reports', exist_ok=True)
     
-    print("\n💾 Processing terminal data (chunked lazy loading)...")
+    print("\n\U0001f4be Processing terminal data (chunked lazy loading)...")
     clean_terminal = strip_ansi_codes(raw_content)
     lines = clean_terminal.split('\n')
     total_lines = len(lines)
@@ -253,17 +253,17 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
         chunks.append('\n'.join(chunk_lines))
     
     # Save chunks as JSON
-    chunks_filename = f"terminal_{{hostname}}_{{timestamp_str}}.json"
+    chunks_filename = f"terminal_{hostname}_{timestamp_str}.json"
     chunks_path = os.path.join('reports', chunks_filename)
     with open(chunks_path, 'w', encoding='utf-8') as f:
-        json.dump({{
+        json.dump({
             'total_lines': total_lines,
             'chunk_size': chunk_size,
             'chunks': chunks
-        }}, f)
+        }, f)
     
-    print(f"  Terminal data: {{chunks_filename}}")
-    print(f"  Total lines: {{total_lines:,}} | Chunks: {{len(chunks)}} | Size: {{len(clean_terminal):,}} bytes")
+    print(f"  Terminal data: {chunks_filename}")
+    print(f"  Total lines: {total_lines:,} | Chunks: {len(chunks)} | Size: {len(clean_terminal):,} bytes")
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -272,26 +272,26 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     section_idx = 0
     for cat_name, cat_sections in categories.items():
         cat_id = cat_name.replace(' ', '_').replace('/', '_')
-        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{{cat_id}}\')">&gt; {{escape(cat_name)}} ({{len(cat_sections)}})</div>'
-        toc_html += f'<ul class="cat-sections" id="cat-{{cat_id}}" style="display:none">'
+        toc_html += f'<li class="cat"><div class="cat-title" onclick="toggleCat(\'{cat_id}\')">& gt; {escape(cat_name)} ({len(cat_sections)})</div>'
+        toc_html += f'<ul class="cat-sections" id="cat-{cat_id}" style="display:none">'
         for section_title in cat_sections:
-            toc_html += f'<li><a href="#s{{section_idx}}" onclick="jump({{section_idx}}); return false;">{{escape(section_title[:70])}}</a></li>'
+            toc_html += f'<li><a href="#s{section_idx}" onclick="jump({section_idx}); return false;">{escape(section_title[:70])}</a></li>'
             section_idx += 1
         toc_html += '</ul></li>'
     
-    # Generate sections
+    # Generate sections - FIXED BRACES
     secs = ''.join([
-        f'<div class="sec" id="s{{i}}'>'
-        f'<div class="st" onclick="tog(this)">v {{escape(t)}}</div>'
-        f'<div class="sc">{{convert_ansi_to_html_colors(c, for_terminal=False)}}</div>'
+        f'<div class="sec" id="s{i}">'
+        f'<div class="st" onclick="tog(this)">v {escape(t)}</div>'
+        f'<div class="sc">{convert_ansi_to_html_colors(c, for_terminal=False)}</div>'
         f'</div>'
         for i, (t, c) in enumerate(sections.items())
     ])
     
     # Generate findings
-    finds = ''.join([f'<div class="f {{f["severity"]}}">{{escape(f["content"])}}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
+    finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript with COMPREHENSIVE DEBUGGING - FIXED STRING ESCAPING
+    # JavaScript with COMPREHENSIVE DEBUGGING
     javascript = f'''<script>
 // ============ DEBUG SYSTEM ============
 const DEBUG_MODE = true;
@@ -313,7 +313,7 @@ window.onerror = (msg, url, line, col, error) => {{
 debugLog('Script loaded');
 
 // ============ CONSTANTS ============
-const TERMINAL_DATA_FILE = '{{chunks_filename}}';
+const TERMINAL_DATA_FILE = '{chunks_filename}';
 let terminalData = null;
 let currentChunk = 0;
 let isLoading = false;
@@ -501,7 +501,7 @@ debugLog('ParsingPeas Debug Edition v2.1 loaded');
     
     # HTML template with DEBUG CONSOLE
     html = f'''<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>ParsingPeas - {{escape(hostname)}}</title>
+<html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;padding:20px}}
@@ -551,13 +551,13 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 </style></head><body>
 <div class="hdr"><h1>ParsingPeas Report <small style="font-size:0.4em;color:#888">[DEBUG MODE]</small></h1>
-<div class="info"><div><strong>Hostname:</strong> {{escape(hostname)}}</div><div><strong>Type:</strong> {{escape(scan_type)}}</div><div><strong>Generated:</strong> {{timestamp}}</div><div><strong>Sections:</strong> {{len(sections)}}</div></div></div>
+<div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
 <div><button class="vb active" onclick="sw(0)">Parsed</button><button class="vb" onclick="sw(1)">Terminal</button></div>
 <div id="p" class="vc active">
-<div class="toc"><h2>Contents ({{len(categories)}} categories)</h2><ul>{{toc_html}}</ul></div>
+<div class="toc"><h2>Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
 <input type="text" class="sb" id="sb" placeholder="Search..."/>
-<div class="hl"><h2>Critical Findings ({{len(findings)}})</h2>{{finds}}</div>
-<div>{{secs}}</div>
+<div class="hl"><h2>Critical Findings ({len(findings)})</h2>{finds}</div>
+<div>{secs}</div>
 </div>
 <div id="r" class="vc">
 <div class="term-controls">
@@ -567,18 +567,18 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 <div class="raw" id="terminal-content"><pre id="terminal-pre"></pre></div>
 </div>
 <div id="debug-console"></div>
-{{javascript}}
+{javascript}
 </body></html>'''
     
-    report_filename = f"report_{{hostname}}_{{timestamp_str}}.html"
+    report_filename = f"report_{hostname}_{timestamp_str}.html"
     report_path = os.path.join('reports', report_filename)
     
     with open(report_path, 'w', encoding='utf-8', errors='xmlcharrefreplace') as f:
         f.write(html)
     
-    print(f"\n✅ Report generated: {{report_path}}")
-    print(f"✅ Terminal data: {{chunks_path}}")
-    print(f"\n🔍 DEBUG MODE ENABLED - Check bottom of page for console logs\n")
+    print(f"\n\u2705 Report generated: {report_path}")
+    print(f"\u2705 Terminal data: {chunks_path}")
+    print(f"\n\U0001f50d DEBUG MODE ENABLED - Check bottom of page for console logs\n")
     return report_path
 
 
