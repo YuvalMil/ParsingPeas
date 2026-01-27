@@ -267,10 +267,16 @@ class PeasParser:
                     found = True
                 elif '1;31m' in line: # Bold Red
                     clean = self.converter.strip(line).strip()
-                    # Filter common false positives
-                    if "Scan" not in clean and "started" not in clean and len(clean) < 300 and "Use the" not in clean:
-                        level = 'high'
-                        found = True
+                    # Enhanced False Positive filtering
+                    if len(clean) > 200: continue # Skip ultra-long lines
+                    if "Scan" in clean or "started" in clean: continue
+                    if "Use the" in clean: continue
+                    if "https://" in clean: continue # URLs often red but not findings
+                    if "Active Internet connections" in clean: continue
+                    if "Proto Recv-Q" in clean: continue
+                    
+                    level = 'high'
+                    found = True
 
                 if found:
                     clean_text = self.converter.strip(line).strip()
