@@ -439,7 +439,7 @@ function loadNextChunk() {{
     const pre = document.getElementById('terminal-pre');
     const status = document.getElementById('term-status');
     
-    pre.textContent += '\n' + terminalData.chunks[currentChunk];
+    pre.textContent += '\\n' + terminalData.chunks[currentChunk];
     currentChunk++;
     
     const linesShown = Math.min(currentChunk * terminalData.chunk_size, terminalData.total_lines);
@@ -467,7 +467,7 @@ function loadAllChunks() {{
     
     setTimeout(() => {{
         const remaining = terminalData.chunks.slice(currentChunk);
-        pre.textContent += '\n' + remaining.join('\n');
+        pre.textContent += '\\n' + remaining.join('\\n');
         
         currentChunk = terminalData.chunks.length;
         allLoaded = true;
