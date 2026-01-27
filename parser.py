@@ -245,15 +245,43 @@ class PeasParser:
         self._extract_findings_contextual()
 
     def _strip_initial_banner(self):
-        """Remove the initial PEAS ASCII logo/banner block from the report output.
+        """Remove the *ASCII art logo* but keep the PEASS credit box.
 
-        LinPEAS prints an ASCII-art banner and a "Do you like PEASS?" box before the
-        first real section header, and that banner is frequently distorted when
-        rendered as HTML.
+        LinPEAS usually prints a big ASCII-art logo, then the "Do you like PEASS?"
+        box, and only then the first real section header.
+
+        We want to drop only the logo (it tends to get distorted in HTML), while
+        keeping the credit box intact.
         """
         lines = self.raw_content.splitlines()
         header_ansi_pattern = '\x1b[1;32m'
 
+        # Prefer keeping the "Do you like PEASS?" box if present
+        box_line_idx = None
+        for i, line in enumerate(lines):
+            clean = self.converter.strip(line).strip().lower()
+            if 'do you like' in clean and 'peass' in clean:
+                box_line_idx = i
+                break
+
+        if box_line_idx is not None:
+            # Walk backwards to capture the full box border (usually uses box-drawing chars)
+            j = box_line_idx
+            steps = 0
+            while j > 0 and steps < 15:
+                prev = lines[j-1]
+                if any(ch in prev for ch in '╔╗╚╝║═'):
+                    j -= 1
+                    steps += 1
+                    continue
+                break
+
+            if j > 0:
+                self.raw_content = "\n".join(lines[j:])
+                self.clean_content = self.converter.strip(self.raw_content)
+            return
+
+        # Fallback: if no box found, strip everything before the first real section header
         for i, line in enumerate(lines):
             clean_line = self.converter.strip(line).strip()
             is_header = False
