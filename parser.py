@@ -26,26 +26,26 @@ def convert_ansi_to_html_colors(text):
     for line in lines:
         # Check if this is a header line (has BOLD GREEN color code 1;32m)
         is_header = '\x1B[1;32m' in line
-        has_box = bool(re.search(r'[╔╗║╚╝═]', line))
+        has_box = bool(re.search(r'[\u2554\u2557\u2551\u255a\u255d\u2550]', line))
         
         # Process the line for colors
         processed = line
         
-        # Map ANSI codes to HTML colors
+        # Map ANSI codes to HTML colors - ADJUSTED for readability
         color_map = [
             (r'\x1B\[1;31m', '<span style="color:#ff6b6b;font-weight:bold">'),  # Bold Red
-            (r'\x1B\[1;32m', '<span style="color:#00ff00;font-weight:bold">'),  # Bold Green (HEADERS!)
+            (r'\x1B\[1;32m', '<span style="color:#50fa7b;font-weight:bold">'),  # Bold Green (brighter but not blinding)
             (r'\x1B\[1;33m', '<span style="color:#ffff00;font-weight:bold">'),  # Bold Yellow
-            (r'\x1B\[1;34m', '<span style="color:#64b5f6;font-weight:bold">'),  # Bold Blue
+            (r'\x1B\[1;34m', '<span style="color:#8be9fd;font-weight:bold">'),  # Bold Blue
             (r'\x1B\[1;35m', '<span style="color:#ff79c6;font-weight:bold">'),  # Bold Magenta
-            (r'\x1B\[1;36m', '<span style="color:#00ffff;font-weight:bold">'),  # Bold Cyan
+            (r'\x1B\[1;36m', '<span style="color:#8be9fd;font-weight:bold">'),  # Bold Cyan
             (r'\x1B\[31m', '<span style="color:#ff5555">'),
             (r'\x1B\[32m', '<span style="color:#50fa7b">'),  # Regular green
             (r'\x1B\[33m', '<span style="color:#f1fa8c">'),
-            (r'\x1B\[34m', '<span style="color:#64b5f6">'),
+            (r'\x1B\[34m', '<span style="color:#8be9fd">'),
             (r'\x1B\[35m', '<span style="color:#ff79c6">'),
-            (r'\x1B\[36m', '<span style="color:#00ffff">'),
-            (r'\x1B\[37m', '<span style="color:#ffffff">'),
+            (r'\x1B\[36m', '<span style="color:#8be9fd">'),
+            (r'\x1B\[37m', '<span style="color:#f8f8f2">'),
             (r'\x1B\[1m', '<span style="font-weight:bold">'),
             (r'\x1B\[0m', '</span>'),
             (r'\x1B\[m', '</span>'),
@@ -62,9 +62,9 @@ def convert_ansi_to_html_colors(text):
         processed = processed.replace('&', '&amp;')
         processed = processed.replace('<', '&lt;').replace('>', '&gt;')
         processed = processed.replace('&lt;span', '<span').replace('&lt;/span&gt;', '</span>')
-        processed = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\1">', processed)
+        processed = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\\1">', processed)
         
-        # Wrap headers in special div for highlighting
+        # Wrap headers in special div for highlighting (subtle now)
         if is_header and has_box:
             processed = f'<div class="term-header">{processed}</div>'
         else:
@@ -91,7 +91,7 @@ def parse_linpeas_by_ansi_colors(content):
     for line in lines:
         # CORRECT header detection: Bold GREEN (1;32m) + box characters
         has_bold_green = '\x1B[1;32m' in line
-        has_box = bool(re.search(r'[╔╗║╚╝═]', line))
+        has_box = bool(re.search(r'[\u2554\u2557\u2551\u255a\u255d\u2550]', line))
         
         clean_line = strip_ansi_codes(line).strip()
         
@@ -103,7 +103,7 @@ def parse_linpeas_by_ansi_colors(content):
             
             # Extract title - remove all box characters
             title = clean_line
-            for char in '╔╗╚╝═║─│┌┐└┘┬┴├┤┼':
+            for char in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c':
                 title = title.replace(char, '')
             title = title.strip()
             
@@ -116,7 +116,7 @@ def parse_linpeas_by_ansi_colors(content):
                 continue
         
         # Skip pure decoration lines (just box characters)
-        if clean_line and all(c in '╔╗╚╝═║─│┌┐└┘┬┴├┤┼ ' for c in clean_line):
+        if clean_line and all(c in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c ' for c in clean_line):
             continue
         
         # Add content to current section
@@ -154,7 +154,7 @@ def extract_critical_findings(content):
         
         if not line or len(line) < 15:
             continue
-        if all(c in '╔╗╚╝═║─│┌┐└┘┬┴├┤┼ ' for c in line):
+        if all(c in '\u2554\u2557\u255a\u255d\u2550\u2551\u2500\u2502\u250c\u2510\u2514\u2518\u252c\u2534\u251c\u2524\u253c ' for c in line):
             continue
         
         for pattern, severity in patterns:
@@ -187,15 +187,15 @@ def generate_html_report(filepath, hostname, scan_type):
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # Generate TOC
-    toc = ''.join([f'<li><a href="#s{i}" onclick="jump({i}); return false;">{escape(t[:70])}</a></li>' 
+    # Generate TOC - single column, more compact
+    toc = ''.join([f'<li><a href="#s{i}" onclick="jump({i}); return false;">{escape(t[:80])}</a></li>' 
                    for i, t in enumerate(sections.keys())])
     
     # Generate sections - STRIP ANSI CODES from content for clean parsed view
     secs = ''.join([
         f'<div class="sec" id="s{i}">'
-        f'<div class="st" onclick="tog(this)">▶ {escape(t)}</div>'
-        f'<div class="sc">{escape(strip_ansi_codes(c))}</div>'  # <-- STRIP ANSI HERE!
+        f'<div class="st" onclick="tog(this)">\u25b6 {escape(t)}</div>'
+        f'<div class="sc">{escape(strip_ansi_codes(c))}</div>'
         f'</div>'
         for i, (t, c) in enumerate(sections.items())
     ])
@@ -218,7 +218,7 @@ function sw(v) {
 function tog(e) {
     let c = e.nextElementSibling;
     c.style.display = c.style.display === 'none' ? 'block' : 'none';
-    e.innerHTML = c.style.display === 'none' ? '▶ ' + e.innerHTML.slice(2) : '▼ ' + e.innerHTML.slice(2);
+    e.innerHTML = c.style.display === 'none' ? '\u25b6 ' + e.innerHTML.slice(2) : '\u25bc ' + e.innerHTML.slice(2);
 }
 
 function jump(i) {
@@ -238,7 +238,7 @@ document.getElementById('sb').addEventListener('input', e => {
 </script>
     """
     
-    # HTML template
+    # HTML template - FIXED COLORS
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -253,12 +253,12 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .vb.active{{background:#00ff00;color:#0a0e27;font-weight:bold}}
 .vc{{display:none}}
 .vc.active{{display:block}}
-.toc{{background:#1a1a2e;padding:20px;border-radius:10px;margin:20px 0;border:2px solid #00ff00;max-height:400px;overflow-y:auto}}
+.toc{{background:#1a1a2e;padding:20px;border-radius:10px;margin:20px 0;border:2px solid #00ff00;max-height:500px;overflow-y:auto}}
 .toc h2{{margin-bottom:15px;color:#00ff00}}
-.toc ul{{list-style:none;column-count:2;column-gap:20px}}
-.toc li{{margin:5px 0;break-inside:avoid}}
-.toc a{{color:#00ff00;text-decoration:none;display:block;padding:5px;border-radius:3px;transition:all .2s}}
-.toc a:hover{{background:rgba(0,255,0,0.1);padding-left:10px}}
+.toc ul{{list-style:none}}
+.toc li{{margin:8px 0}}
+.toc a{{color:#50fa7b;text-decoration:none;display:block;padding:8px 12px;border-radius:5px;transition:all .2s;border-left:3px solid transparent}}
+.toc a:hover{{background:rgba(0,255,0,0.15);border-left-color:#00ff00;padding-left:16px}}
 .sb{{width:100%;padding:15px;background:#1a1a2e;border:2px solid #00ff00;color:#00ff00;font-size:16px;border-radius:5px;margin-bottom:20px}}
 .hl{{background:#1a1a2e;padding:20px;border-radius:10px;margin-bottom:30px;border:2px solid #ff6b6b}}
 .hl h2{{color:#ff6b6b;margin-bottom:15px}}
@@ -271,23 +271,23 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .st{{color:#00ff00;cursor:pointer;padding:10px;background:rgba(0,255,0,0.1);border-radius:5px;margin-bottom:10px;user-select:none}}
 .st:hover{{background:rgba(0,255,0,0.2)}}
 .sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.5;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto;display:none;color:#e0e0e0}}
-.raw{{background:#1a1a2e;padding:20px;border-radius:10px;border:2px solid #00ff00;font:12px 'Courier New',monospace;line-height:1.4;max-height:80vh;overflow-y:auto;color:#e0e0e0}}
-.term-header{{background:rgba(0,255,0,0.15);padding:8px 12px;margin:15px -12px;border-left:4px solid #00ff00;border-radius:3px}}
-.term-line{{margin:0;padding:2px 0}}
+.raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;font:12px 'Courier New',monospace;line-height:1.6;max-height:80vh;overflow-y:auto;color:#c9d1d9}}
+.term-header{{background:rgba(80,250,123,0.1);padding:6px 10px;margin:10px 0;border-left:3px solid #50fa7b;border-radius:3px}}
+.term-line{{margin:0;padding:1px 0}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 </style></head><body>
-<div class="hdr"><h1>🥒 ParsingPeas Report</h1>
+<div class="hdr"><h1>\ud83e\udd52 ParsingPeas Report</h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
-<div><button class="vb active" onclick="sw(0)">📊 Parsed</button><button class="vb" onclick="sw(1)">💻 Terminal</button></div>
+<div><button class="vb active" onclick="sw(0)">\ud83d\udcca Parsed</button><button class="vb" onclick="sw(1)">\ud83d\udcbb Terminal</button></div>
 <div id="p" class="vc active">
-<div class="toc"><h2>📋 Contents</h2><ul>{toc}</ul></div>
-<input type="text" class="sb" id="sb" placeholder="🔍 Search..."/>
-<div class="hl"><h2>⚠️ Critical Findings ({len(findings)})</h2>{finds}</div>
+<div class="toc"><h2>\ud83d\udccb Contents ({len(sections)} sections)</h2><ul>{toc}</ul></div>
+<input type="text" class="sb" id="sb" placeholder="\ud83d\udd0d Search..."/>
+<div class="hl"><h2>\u26a0\ufe0f Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="🔍 Search raw..."/><div class="raw">{terminal_html}</div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="\ud83d\udd0d Search raw..."/><div class="raw">{terminal_html}</div></div>
 {javascript}
 </body></html>'''
     
@@ -298,7 +298,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(html)
     
-    print(f"\n✓ Report generated: {report_path}\n")
+    print(f"\n\u2713 Report generated: {report_path}\n")
     return report_path
 
 
