@@ -206,7 +206,7 @@ def extract_critical_findings(content):
 def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     """Generate interactive HTML report"""
     
-    print(f"\n\U0001f4ca Parsing {filepath}...\n")
+    print(f"\n🔹 Parsing {filepath}...\n")
     
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -216,29 +216,36 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
             raw_content = f.read().decode('utf-8', errors='ignore')
     
     if not hostname:
-        print("\U0001f310 Extracting hostname...")
+        print("🌐 Extracting hostname...")
         hostname = extract_hostname(raw_content)
         print(f"  Hostname: {hostname}")
     
-    print("\n\U0001f50d Detecting sections...")
+    print("\n🔍 Detecting sections...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
     
     if not sections:
-        print("\u26a0\ufe0f  WARNING: No sections found!")
+        print("⚠️  WARNING: No sections found!")
         return None
     
-    print("\n\U0001f4c1 Organizing into categories...")
+    print("\n📁 Organizing into categories...")
     categories = categorize_sections(sections)
     for cat_name, cat_sections in categories.items():
         print(f"  {cat_name}: {len(cat_sections)} sections")
     
-    print("\n\u26a0\ufe0f  Extracting critical findings...")
+    print("\n⚠️  Extracting critical findings...")
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    print("\n\U0001f4be Encoding terminal data (base64)...")
-    raw_base64 = base64.b64encode(raw_content.encode('utf-8')).decode('ascii')
-    print(f"  Encoded size: {len(raw_base64)} bytes")
+    # Save raw terminal data to separate file
+    timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+    os.makedirs('reports', exist_ok=True)
+    
+    print("\n💾 Saving raw terminal data to separate file...")
+    raw_filename = f"terminal_{hostname}_{timestamp_str}.txt"
+    raw_path = os.path.join('reports', raw_filename)
+    with open(raw_path, 'w', encoding='utf-8', errors='ignore') as f:
+        f.write(raw_content)
+    print(f"  Terminal data: {raw_filename} ({len(raw_content)} bytes)")
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -254,7 +261,7 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
             section_idx += 1
         toc_html += '</ul></li>'
     
-    # Generate sections - VISIBLE BY DEFAULT
+    # Generate sections
     secs = ''.join([
         f'<div class="sec" id="s{i}">'
         f'<div class="st" onclick="tog(this)">v {escape(t)}</div>'
@@ -266,82 +273,78 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript - USE TEXTCONTENT NOT INNERHTML
-    javascript = r'''
+    # JavaScript - FETCH file instead of decoding base64
+    javascript = f'''
 <script>
+const TERMINAL_DATA_FILE = '{raw_filename}';
 let terminalLoaded = false;
 
-function sw(v) {
+function sw(v) {{
     document.querySelectorAll('.vb').forEach((b,i) => b.classList.toggle('active', i===v));
     document.querySelectorAll('.vc').forEach((c,i) => c.classList.toggle('active', i===v));
     
-    if (v === 1 && !terminalLoaded) {
+    if (v === 1 && !terminalLoaded) {{
         console.log('Loading terminal view...');
-        const terminal = document.getElementById('terminal-content');
         const pre = document.getElementById('terminal-pre');
+        pre.textContent = 'Loading terminal data...';
         
-        setTimeout(() => {
-            try {
-                const rawDataBase64 = document.getElementById('raw-data').value;
-                console.log('Base64 length:', rawDataBase64.length);
-                if (!rawDataBase64) {
-                    throw new Error('No base64 data found');
-                }
-                const rawData = atob(rawDataBase64);
-                console.log('Decoded length:', rawData.length);
-                
+        fetch(TERMINAL_DATA_FILE)
+            .then(r => {{
+                if (!r.ok) throw new Error('Failed to load terminal data');
+                return r.text();
+            }})
+            .then(rawData => {{
+                console.log('Loaded', rawData.length, 'bytes');
                 // Strip ANSI codes
-                const clean = rawData.replace(/\x1B\[[0-9;]*m/g, '');
-                console.log('Cleaned length:', clean.length);
-                
+                const clean = rawData.replace(/\\x1B\\[[0-9;]*m/g, '');
+                console.log('Cleaned to', clean.length, 'bytes');
                 // Use textContent - NO HTML PARSING!
                 pre.textContent = clean;
-                
                 terminalLoaded = true;
                 console.log('Terminal loaded!');
-            } catch(e) {
-                terminal.innerHTML = '<p style="color:#ff6b6b;padding:20px">Error loading terminal: ' + e.message + '</p>';
+            }})
+            .catch(e => {{
+                pre.textContent = 'Error loading terminal: ' + e.message;
                 console.error('Terminal load error:', e);
-            }
-        }, 100);
-    }
-}
+            }});
+    }}
+}}
 
-function tog(e) {
+function tog(e) {{
     let c = e.nextElementSibling;
     c.style.display = c.style.display === 'none' ? 'block' : 'none';
-    if (c.style.display === 'none') {
+    if (c.style.display === 'none') {{
         e.innerHTML = '&gt; ' + e.innerHTML.slice(2);
-    } else {
+    }} else {{
         e.innerHTML = 'v ' + e.innerHTML.slice(2);
-    }
-}
+    }}
+}}
 
-function toggleCat(id) {
+function toggleCat(id) {{
     let cat = document.getElementById('cat-' + id);
     let title = event.target;
     cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
     let txt = title.textContent;
     title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + txt.substring(2);
-}
+}}
 
-function jump(i) {
+function jump(i) {{
     let s = document.getElementById('s' + i);
-    s.scrollIntoView({behavior: 'smooth'});
-}
+    s.scrollIntoView({{behavior: 'smooth'}});
+}}
 
-document.getElementById('sb').addEventListener('input', e => {
+document.getElementById('sb').addEventListener('input', e => {{
     let q = e.target.value.toLowerCase();
-    document.querySelectorAll('.sec').forEach(s => {
+    document.querySelectorAll('.sec').forEach(s => {{
         s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
-    });
-});
+    }});
+}});
 
 console.log('ParsingPeas loaded!');
 </script>
     '''
     
-    # HTML template
+    # HTML template (NO base64 textarea!)
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -385,9 +388,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
-#raw-data{{display:none}}
 </style></head><body>
-<textarea id="raw-data">{raw_base64}</textarea>
 <div class="hdr"><h1>ParsingPeas Report</h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
 <div><button class="vb active" onclick="sw(0)">Parsed</button><button class="vb" onclick="sw(1)">Terminal</button></div>
@@ -397,18 +398,18 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 <div class="hl"><h2>Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><pre id="terminal-pre">Click Terminal button above to load raw output</pre></div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><pre id="terminal-pre">Click Terminal button to load raw output...</pre></div></div>
 {javascript}
 </body></html>'''
     
-    os.makedirs('reports', exist_ok=True)
-    report_filename = f"report_{hostname}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    report_filename = f"report_{hostname}_{timestamp_str}.html"
     report_path = os.path.join('reports', report_filename)
     
     with open(report_path, 'w', encoding='utf-8', errors='xmlcharrefreplace') as f:
         f.write(html)
     
-    print(f"\n\u2705 Report generated: {report_path}\n")
+    print(f"\n✅ Report generated: {report_path}")
+    print(f"   Terminal data: {raw_path}\n")
     return report_path
 
 
