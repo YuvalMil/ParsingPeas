@@ -60,6 +60,9 @@ class AnsiConverter:
                 elif code in self.COLORS: current_style['color'] = self.COLORS[code]
                 elif code == '39': current_style['color'] = None
                 elif code == '49': current_style['bg'] = None
+                # Handle red background for crits (often 41 or 101)
+                elif code == '41': current_style['bg'] = '#ff0000'
+                elif code == '101': current_style['bg'] = '#ff0000' 
             
             if text_segment:
                 span = get_span_tag(current_style)
@@ -233,10 +236,15 @@ class PeasParser:
                 found = False
                 level = ""
                 
-                if '1;31;103m' in line or '1;37;41m' in line:
+                # Check raw ANSI for exact LinPEAS signatures
+                # Red/Yellow = 1;31;103m OR 1;37;41m (Bold Red on Yellow OR Bold White on Red)
+                # Actually LinPEAS uses 1;37;41m (White on Red) for LEGEND RED/YELLOW usually
+                # But we check both combinations seen in the wild
+                
+                if '1;37;41m' in line or '1;31;103m' in line or ';41m' in line:
                     level = 'critical'
                     found = True
-                elif '1;31m' in line:
+                elif '1;31m' in line: # Bold Red
                     clean = self.converter.strip(line).strip()
                     if "Scan" not in clean and "started" not in clean and len(clean) < 300:
                         level = 'high'
@@ -315,9 +323,15 @@ class ReportGenerator:
                 safe_title = html.escape(title)
                 sec_id = self.parser.section_ids[title]
                 
-                # Check if this section has findings for TOC indicator
-                has_findings = title in self.parser.section_findings
-                indicator = '<span class="toc-finding-dot"></span>' if has_findings else ''
+                # TOC Indicators
+                indicator = ''
+                if title in self.parser.section_findings:
+                    findings = self.parser.section_findings[title]
+                    has_critical = any(f['level'] == 'critical' for f in findings)
+                    if has_critical:
+                        indicator = '<span class="toc-finding-dot critical"></span>'
+                    else:
+                        indicator = '<span class="toc-finding-dot high"></span>'
                 
                 toc_html.append(f'<li><a href="#{sec_id}">{safe_title} {indicator}</a></li>')
                 
@@ -335,18 +349,16 @@ class ReportGenerator:
             
             toc_html.append('</ul></details></li>')
 
-        # Build Grouped Findings Panel (Section Cards)
+        # Build Grouped Findings Panel
         findings_html = []
         if not self.parser.section_findings:
              findings_html.append('<div class="finding-card empty">No critical findings automatically detected.</div>')
         else:
-            # Sort sections by finding severity/count if desired, but here we iterate existing order
             for title, findings_list in self.parser.section_findings.items():
                 sec_id = self.parser.section_ids[title]
                 crit_count = sum(1 for f in findings_list if f['level'] == 'critical')
                 high_count = sum(1 for f in findings_list if f['level'] == 'high')
                 
-                # Determine card accent color
                 card_class = "critical" if crit_count > 0 else "high"
                 
                 findings_html.append(f'''
@@ -412,7 +424,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         details li a {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
         details li a:hover {{ color: white; background: rgba(255,255,255,0.05); }}
-        .toc-finding-dot {{ width: 8px; height: 8px; background: var(--high-fg); border-radius: 50%; box-shadow: 0 0 5px var(--high-fg); }}
+        
+        /* Sidebar Dots */
+        .toc-finding-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; }}
+        .toc-finding-dot.high {{ background: var(--high-fg); box-shadow: 0 0 5px var(--high-fg); }}
+        /* Critical dot mimics red/yellow */
+        .toc-finding-dot.critical {{ background: var(--critical-bg); border: 2px solid var(--critical-fg); box-shadow: 0 0 5px var(--critical-bg); width: 8px; height: 8px; }}
         
         .count {{ font-size: 0.8em; opacity: 0.5; font-weight: normal; background: #333; padding: 2px 6px; border-radius: 10px; }}
         
