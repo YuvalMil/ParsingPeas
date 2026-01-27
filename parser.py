@@ -18,7 +18,11 @@ from pathlib import Path
 CHUNK_SIZE = 2000  # Lines per chunk for terminal view loading
 
 class AnsiConverter:
-    """Handles conversion of ANSI codes to HTML for report viewing."""
+    """
+    Handles conversion of ANSI codes to HTML for report viewing.
+    Uses a state-machine approach to ensure flat, valid HTML spans
+    rather than deeply nested tags that can break browsers.
+    """
     
     # Standard ANSI color codes to HTML hex values
     COLORS = {
@@ -26,41 +30,80 @@ class AnsiConverter:
         '34': '#8be9fd', '35': '#ff79c6', '36': '#8be9fd', '37': '#f8f8f2',
         '90': '#6272a4', '91': '#ff6e6e', '92': '#69ff94', '93': '#ffffa5',
         '94': '#d6acff', '95': '#ff92df', '96': '#a4ffff', '97': '#ffffff',
-        # Bold variants mapping to bright colors often used in terminals
-        '1;31': '#ff6b6b', '1;32': '#50fa7b', '1;33': '#f1fa8c',
-        '1;34': '#8be9fd', '1;35': '#ff79c6', '1;36': '#8be9fd'
     }
 
     def to_html(self, text):
-        """Converts ANSI text to HTML spans with styling."""
-        # 1. Escape HTML characters first to prevent injection
-        text = html.escape(text)
+        """
+        Converts ANSI text to HTML spans with styling.
+        Maintains a 'current style' state and emits flat <span> tags.
+        """
+        # 1. Sanitize the input text first
+        # We process the text by splitting on ANSI codes
+        # The regex captures the code so we can process it
+        parts = re.split(r'\x1b\[([\d;]*)m', text)
         
-        # 2. Handle Bold
-        text = re.sub(r'\x1b\[1m', '<b>', text)
-        text = re.sub(r'\x1b\[22m', '</b>', text) # Reset bold
+        result = []
+        current_style = {'color': None, 'bold': False, 'bg': None}
         
-        # 3. Handle Colors
-        def replace_color(match):
-            code = match.group(1)
-            color = self.COLORS.get(code)
-            if color:
-                return f'<span style="color:{color}">'
-            return ''
+        # Helper to generate the opening span tag for current state
+        def get_span_tag(style):
+            css = []
+            if style['color']: css.append(f"color:{style['color']}")
+            if style['bold']: css.append("font-weight:bold")
+            if style['bg']: css.append(f"background-color:{style['bg']}")
+            
+            if not css: return ""
+            return f'<span style="{";".join(css)}">'
 
-        # Match ANSI color codes like [31m or [1;31m
-        text = re.sub(r'\x1b\[([\d;]+)m', replace_color, text)
-        
-        # 4. Handle Reset
-        # Close any open spans or bold tags. This is a simplification; 
-        # a perfect parser would track stack state, but this suffices for log viewing.
-        text = text.replace('\x1b[0m', '</span></b>') 
-        text = re.sub(r'\x1b\[0?m', '</span>', text)
-        
-        # 5. Clean up any remaining/unsupported ANSI codes
-        text = re.sub(r'\x1b\[[\d;]*[a-zA-Z]', '', text)
-        
-        return text
+        # Process parts: [text, code, text, code, ...]
+        # First part is always text (might be empty)
+        if parts[0]:
+            result.append(html.escape(parts[0]))
+            
+        # Iterate over code/text pairs
+        # parts[1] is code, parts[2] is text, etc.
+        for i in range(1, len(parts), 2):
+            code_seq = parts[i]
+            text_segment = parts[i+1]
+            
+            # Parse the ANSI code(s)
+            codes = code_seq.split(';')
+            for code in codes:
+                if not code: code = '0' # Empty code \x1b[m means reset
+                
+                if code == '0':
+                    current_style = {'color': None, 'bold': False, 'bg': None}
+                elif code == '1':
+                    current_style['bold'] = True
+                elif code == '22':
+                    current_style['bold'] = False
+                elif code in self.COLORS:
+                    current_style['color'] = self.COLORS[code]
+                elif code == '39':
+                    current_style['color'] = None # Default FG
+                elif code == '49':
+                    current_style['bg'] = None # Default BG
+                
+                # Handle extended colors like 1;31 (already split by ;)
+                # The logic above handles '1' then '31' sequentially, which works perfectly.
+
+            # If there is a current style, wrap the text segment
+            # We close the previous span (if any) implicitly by just outputting the new span
+            # Actually, to generate valid HTML, we should close the previous span *if* we were inside one.
+            # But the simplest robust way is: 
+            # 1. Close previous span (always)
+            # 2. Open new span with current state
+            # 3. Append text
+            # Optimization: Only do this if text_segment is not empty
+            
+            if text_segment:
+                span = get_span_tag(current_style)
+                if span:
+                    result.append(f"{span}{html.escape(text_segment)}</span>")
+                else:
+                    result.append(html.escape(text_segment))
+                    
+        return "".join(result)
 
     def strip(self, text):
         """Removes all ANSI codes for plain text analysis."""
@@ -176,6 +219,7 @@ class ReportGenerator:
     def generate(self):
         """Orchestrates generation of JSON data and HTML report."""
         # 1. Save Raw JSON for Terminal View (Safe separation of data)
+        # We pre-convert ANSI for the terminal view JSON so the browser just renders HTML
         terminal_json_name = f"terminal_{self.parser.hostname}_{self.timestamp}.json"
         self._save_terminal_data(terminal_json_name)
         
@@ -190,9 +234,17 @@ class ReportGenerator:
         return report_name
 
     def _save_terminal_data(self, filename):
-        """Chunks raw output and saves as valid JSON."""
+        """
+        Chunks output and saves as valid JSON.
+        Crucially, it runs the ANSI conversion HERE so the browser gets ready-to-render HTML.
+        """
         lines = self.parser.raw_content.splitlines()
-        chunks = ['\n'.join(lines[i:i+CHUNK_SIZE]) for i in range(0, len(lines), CHUNK_SIZE)]
+        
+        # Convert each line to HTML-safe ANSI
+        # We join them into chunks to keep file size manageable but reduce request count
+        converted_lines = [self.parser.converter.to_html(line) for line in lines]
+        
+        chunks = ['\n'.join(converted_lines[i:i+CHUNK_SIZE]) for i in range(0, len(converted_lines), CHUNK_SIZE)]
         
         data = {
             "meta": {
@@ -204,7 +256,6 @@ class ReportGenerator:
             "chunks": chunks
         }
         
-        # Use json.dump for guaranteed valid JSON serialization
         with open(self.output_dir / filename, 'w', encoding='utf-8') as f:
             json.dump(data, f)
 
@@ -251,7 +302,6 @@ class ReportGenerator:
         )
 
 # --- HTML Template ---
-# Kept strictly separate from logic for clarity
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -397,8 +447,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (nextChunkIdx >= chunks.length) return;
             
             const pre = document.getElementById('term-content');
-            // innerText handles newlines correctly while preserving security
-            pre.innerText += chunks[nextChunkIdx] + "\\n"; 
+            
+            // SECURITY NOTE: We are using innerHTML here because the content has been 
+            // properly HTML-escaped by the Python AnsiConverter before being saved to JSON.
+            // This is required to render the <span style="..."> tags for colors.
+            // The logic guarantees that only our own <span> tags and escaped text exist.
+            pre.innerHTML += chunks[nextChunkIdx] + "\\n"; 
             nextChunkIdx++;
             
             // If there's more, show loader briefly if scrolling fast? 
