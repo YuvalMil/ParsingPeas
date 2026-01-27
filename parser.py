@@ -17,6 +17,27 @@ def strip_ansi_codes(text):
     return ansi_escape.sub('', text)
 
 
+def extract_hostname(content):
+    """Extract hostname from linpeas output"""
+    clean = strip_ansi_codes(content)
+    
+    # Try multiple patterns
+    patterns = [
+        r'Hostname:\s*([\w\-\.]+)',
+        r'hostname=([\w\-\.]+)',
+        r'\[\+\].*Hostname.*?:\s*([\w\-\.]+)',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, clean, re.IGNORECASE)
+        if match:
+            hostname = match.group(1).strip()
+            if hostname and hostname not in ['localhost', 'unknown']:
+                return hostname
+    
+    return 'unknown'
+
+
 def convert_ansi_to_html_colors(text, for_terminal=True):
     """
     Convert ANSI codes to colored HTML
@@ -182,7 +203,7 @@ def extract_critical_findings(content):
     return findings[:50]
 
 
-def generate_html_report(filepath, hostname, scan_type):
+def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     """Generate interactive HTML report"""
     
     print(f"\n\U0001f4ca Parsing {filepath}...\n")
@@ -194,8 +215,18 @@ def generate_html_report(filepath, hostname, scan_type):
         with open(filepath, 'rb') as f:
             raw_content = f.read().decode('utf-8', errors='ignore')
     
-    print("\U0001f50d Detecting sections...")
+    # Extract hostname if not provided
+    if not hostname:
+        print("\U0001f310 Extracting hostname...")
+        hostname = extract_hostname(raw_content)
+        print(f"  Hostname: {hostname}")
+    
+    print("\n\U0001f50d Detecting sections...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
+    
+    if not sections:
+        print("\u26a0\ufe0f  WARNING: No sections found!")
+        return None
     
     print("\n\U0001f4c1 Organizing into categories...")
     categories = categorize_sections(sections)
@@ -271,6 +302,8 @@ document.getElementById('sb').addEventListener('input', e => {
         s.style.display = s.textContent.toLowerCase().includes(q) ? 'block' : 'none';
     });
 });
+
+console.log('ParsingPeas loaded!');
 </script>
     """
     
@@ -318,16 +351,16 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
 </style></head><body>
-<div class="hdr"><h1>\U0001f95a ParsingPeas Report</h1>
+<div class="hdr"><h1>ParsingPeas Report</h1>
 <div class="info"><div><strong>Hostname:</strong> {escape(hostname)}</div><div><strong>Type:</strong> {escape(scan_type)}</div><div><strong>Generated:</strong> {timestamp}</div><div><strong>Sections:</strong> {len(sections)}</div></div></div>
-<div><button class="vb active" onclick="sw(0)">\U0001f4ca Parsed</button><button class="vb" onclick="sw(1)">\U0001f4bb Terminal</button></div>
+<div><button class="vb active" onclick="sw(0)">Parsed</button><button class="vb" onclick="sw(1)">Terminal</button></div>
 <div id="p" class="vc active">
-<div class="toc"><h2>\U0001f4cb Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
-<input type="text" class="sb" id="sb" placeholder="\U0001f50d Search..."/>
-<div class="hl"><h2>\u26a0\ufe0f Critical Findings ({len(findings)})</h2>{finds}</div>
+<div class="toc"><h2>Contents ({len(categories)} categories)</h2><ul>{toc_html}</ul></div>
+<input type="text" class="sb" id="sb" placeholder="Search..."/>
+<div class="hl"><h2>Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="\U0001f50d Search raw..."/><div class="raw">{terminal_html}</div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw">{terminal_html}</div></div>
 {javascript}
 </body></html>'''
     
@@ -345,6 +378,6 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1:
-        result = generate_html_report(sys.argv[1], 'test', 'linpeas')
+        result = generate_html_report(sys.argv[1])
     else:
         print("Usage: python3 parser.py <linpeas_output_file>")
