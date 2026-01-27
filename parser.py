@@ -16,6 +16,12 @@ def strip_ansi_codes(text):
     return ansi_escape.sub('', text)
 
 
+def clean_surrogates(text):
+    """Remove surrogate characters that can't be encoded in UTF-8"""
+    # Replace surrogate characters with a safe placeholder
+    return text.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+
+
 def convert_ansi_to_html_colors(text):
     """
     Convert ANSI codes to colored HTML for terminal view
@@ -62,7 +68,7 @@ def convert_ansi_to_html_colors(text):
         processed = processed.replace('&', '&amp;')
         processed = processed.replace('<', '&lt;').replace('>', '&gt;')
         processed = processed.replace('&lt;span', '<span').replace('&lt;/span&gt;', '</span>')
-        processed = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\\1">', processed)
+        processed = re.sub(r'style=&quot;([^&]+?)&quot;&gt;', r'style="\1">', processed)
         
         # Wrap headers in special div for highlighting (subtle now)
         if is_header and has_box:
@@ -172,8 +178,12 @@ def generate_html_report(filepath, hostname, scan_type):
     
     print(f"\nParsing {filepath}...")
     
-    with open(filepath, 'r', errors='ignore') as f:
+    # Read with proper error handling for malformed UTF-8
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
         raw_content = f.read()
+    
+    # Clean any surrogate characters
+    raw_content = clean_surrogates(raw_content)
     
     print("Detecting sections (looking for bold green 1;32m + box chars)...")
     sections = parse_linpeas_by_ansi_colors(raw_content)
@@ -291,11 +301,14 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 {javascript}
 </body></html>'''
     
-    # Save report
+    # Ensure output directory exists
+    os.makedirs('reports', exist_ok=True)
+    
+    # Save report with error handling
     report_filename = f"report_{hostname}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
     report_path = os.path.join('reports', report_filename)
     
-    with open(report_path, 'w', encoding='utf-8') as f:
+    with open(report_path, 'w', encoding='utf-8', errors='replace') as f:
         f.write(html)
     
     print(f"\n\u2713 Report generated: {report_path}\n")
