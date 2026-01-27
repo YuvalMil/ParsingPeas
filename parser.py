@@ -236,16 +236,18 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     findings = extract_critical_findings(raw_content)
     print(f"  Found {len(findings)} critical findings")
     
-    # Save raw terminal data to separate file
+    # Save raw terminal data to separate file - STRIP ANSI CODES IN PYTHON
     timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
     os.makedirs('reports', exist_ok=True)
     
-    print("\n💾 Saving raw terminal data to separate file...")
+    print("\n💾 Processing terminal data (stripping ANSI codes)...")
+    clean_terminal = strip_ansi_codes(raw_content)
     raw_filename = f"terminal_{hostname}_{timestamp_str}.txt"
     raw_path = os.path.join('reports', raw_filename)
     with open(raw_path, 'w', encoding='utf-8', errors='ignore') as f:
-        f.write(raw_content)
-    print(f"  Terminal data: {raw_filename} ({len(raw_content)} bytes)")
+        f.write(clean_terminal)
+    print(f"  Terminal data: {raw_filename}")
+    print(f"  Original: {len(raw_content)} bytes -> Clean: {len(clean_terminal)} bytes")
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -273,7 +275,7 @@ def generate_html_report(filepath, hostname=None, scan_type='linpeas'):
     # Generate findings
     finds = ''.join([f'<div class="f {f["severity"]}">{escape(f["content"])}</div>' for f in findings]) if findings else '<div class="nf">No critical findings detected</div>'
     
-    # JavaScript - FETCH file instead of decoding base64
+    # JavaScript - Just fetch and display, NO processing needed!
     javascript = f'''
 <script>
 const TERMINAL_DATA_FILE = '{raw_filename}';
@@ -286,26 +288,22 @@ function sw(v) {{
     if (v === 1 && !terminalLoaded) {{
         console.log('Loading terminal view...');
         const pre = document.getElementById('terminal-pre');
-        pre.textContent = 'Loading terminal data...';
+        pre.textContent = 'Loading...';
         
         fetch(TERMINAL_DATA_FILE)
             .then(r => {{
-                if (!r.ok) throw new Error('Failed to load terminal data');
+                if (!r.ok) throw new Error('Failed to load: ' + r.status);
                 return r.text();
             }})
-            .then(rawData => {{
-                console.log('Loaded', rawData.length, 'bytes');
-                // Strip ANSI codes
-                const clean = rawData.replace(/\\x1B\\[[0-9;]*m/g, '');
-                console.log('Cleaned to', clean.length, 'bytes');
-                // Use textContent - NO HTML PARSING!
-                pre.textContent = clean;
+            .then(data => {{
+                console.log('Loaded', data.length, 'bytes');
+                pre.textContent = data;
                 terminalLoaded = true;
-                console.log('Terminal loaded!');
+                console.log('Terminal ready!');
             }})
             .catch(e => {{
-                pre.textContent = 'Error loading terminal: ' + e.message;
-                console.error('Terminal load error:', e);
+                pre.textContent = 'Error: ' + e.message + '\\n\\nMake sure to open this file via http:// (not file:///)\\nRun: python3 -m http.server 8000';
+                console.error(e);
             }});
     }}
 }}
@@ -313,24 +311,18 @@ function sw(v) {{
 function tog(e) {{
     let c = e.nextElementSibling;
     c.style.display = c.style.display === 'none' ? 'block' : 'none';
-    if (c.style.display === 'none') {{
-        e.innerHTML = '&gt; ' + e.innerHTML.slice(2);
-    }} else {{
-        e.innerHTML = 'v ' + e.innerHTML.slice(2);
-    }}
+    e.innerHTML = (c.style.display === 'none' ? '&gt; ' : 'v ') + e.innerHTML.slice(2);
 }}
 
 function toggleCat(id) {{
     let cat = document.getElementById('cat-' + id);
     let title = event.target;
     cat.style.display = cat.style.display === 'none' ? 'block' : 'none';
-    let txt = title.textContent;
-    title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + txt.substring(2);
+    title.textContent = (cat.style.display === 'none' ? '> ' : 'v ') + title.textContent.substring(2);
 }}
 
 function jump(i) {{
-    let s = document.getElementById('s' + i);
-    s.scrollIntoView({{behavior: 'smooth'}});
+    document.getElementById('s' + i).scrollIntoView({{behavior: 'smooth'}});
 }}
 
 document.getElementById('sb').addEventListener('input', e => {{
@@ -340,11 +332,11 @@ document.getElementById('sb').addEventListener('input', e => {{
     }});
 }});
 
-console.log('ParsingPeas loaded!');
+console.log('ParsingPeas v2.0 loaded!');
 </script>
     '''
     
-    # HTML template (NO base64 textarea!)
+    # HTML template
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>ParsingPeas - {escape(hostname)}</title>
 <style>
@@ -384,7 +376,6 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 .sc{{white-space:pre-wrap;font:13px 'Courier New',monospace;line-height:1.6;padding:15px;background:rgba(0,0,0,0.3);border-radius:5px;max-height:600px;overflow-y:auto}}
 .raw{{background:#0d1117;padding:20px;border-radius:10px;border:2px solid #30363d;max-height:80vh;overflow-y:auto}}
 #terminal-pre{{color:#50fa7b;margin:0;white-space:pre-wrap;word-wrap:break-word;font:12px 'Courier New',monospace;line-height:1.6}}
-.term-header{{background:rgba(80,250,123,0.08);padding:4px 8px;margin:6px 0;border-left:3px solid #50fa7b;border-radius:3px}}
 .sc::-webkit-scrollbar,.toc::-webkit-scrollbar,.raw::-webkit-scrollbar{{width:10px}}
 .sc::-webkit-scrollbar-track,.toc::-webkit-scrollbar-track,.raw::-webkit-scrollbar-track{{background:#0a0e27}}
 .sc::-webkit-scrollbar-thumb,.toc::-webkit-scrollbar-thumb,.raw::-webkit-scrollbar-thumb{{background:#00ff00;border-radius:5px}}
@@ -398,7 +389,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
 <div class="hl"><h2>Critical Findings ({len(findings)})</h2>{finds}</div>
 <div>{secs}</div>
 </div>
-<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><pre id="terminal-pre">Click Terminal button to load raw output...</pre></div></div>
+<div id="r" class="vc"><input type="text" class="sb" placeholder="Search raw..."/><div class="raw" id="terminal-content"><pre id="terminal-pre">Click Terminal button to load...</pre></div></div>
 {javascript}
 </body></html>'''
     
@@ -409,7 +400,7 @@ body{{font-family:'Courier New',monospace;background:#0a0e27;color:#e0e0e0;paddi
         f.write(html)
     
     print(f"\n✅ Report generated: {report_path}")
-    print(f"   Terminal data: {raw_path}\n")
+    print(f"✅ Terminal data: {raw_path}\n")
     return report_path
 
 
