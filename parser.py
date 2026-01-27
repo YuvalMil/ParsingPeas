@@ -76,15 +76,57 @@ class AnsiConverter:
 
 class CategoryManager:
     """Manages the categorization of checks."""
+    
+    # 12 Granular Categories
     CATEGORIES = {
-        "System Information": ["Basic information", "System Information", "OS Information", "Environment", "Operative system", "Sudo version", "Hostname", "CPU", "Env"],
-        "Network Information": ["Network Information", "Interfaces", "Ports", "Listening", "Routes", "DNS", "Hosts", "ARP", "Netstat", "Shares"],
-        "User Information": ["User Information", "Users & Groups", "Password Policy", "Logon Sessions", "Clipboard", "LSA Secrets", "SAM", "Home folders", "Superusers", "Privileges"],
-        "Processes & Services": ["Processes Information", "Processes & Cron", "Services Information", "Systemd", "Cron", "Scheduled Tasks", "Autoruns", "Running Processes", "Binary processes"],
-        "Software & Containers": ["Software Information", "Installed Software", "Compiler", "Container", "Docker", "Kubernetes", "Cloud", "AWS", "GCP", "Azure", "LXC", "Useful Software"],
-        "Files & Registry": ["File Information", "Interesting Files", "Registry Information", "Writable Files", "Capabilities", "SUID", "SGID", "Permission", "Mounts"],
-        "Credentials & Secrets": ["Searching passwords", "Credentials", "API Keys", "Passwords", "Identities", "SSH Keys", "History Files", "Browser", "Mails"],
-        "Vulnerabilities & Exploits": ["Exploits", "CVE", "Vulnerability", "Probes"]
+        "System Information": [
+            "Basic information", "System Information", "OS Information", "Environment", 
+            "Operative system", "Hostname", "Env", "Version"
+        ],
+        "Kernel & Hardware": [
+            "Kernel information", "Loaded modules", "PCI devices", "USB devices", 
+            "Dmesg output", "System stats", "CPU", "Drivers", "Processor"
+        ],
+        "Security & Defenses": [
+            "AppArmor", "SELinux", "ASLR", "Grub configuration", "Auditd", 
+            "Defender", "Firewall", "Protections", "Security"
+        ],
+        "Network Information": [
+            "Network Information", "Interfaces", "Ports", "Listening", "Routes", 
+            "DNS", "Hosts", "ARP", "Netstat", "Shares"
+        ],
+        "User Information": [
+            "User Information", "Users & Groups", "Password Policy", "Logon Sessions", 
+            "LSA Secrets", "SAM", "Home folders", "Superusers", "Privileges", 
+            "Console", "Last logon", "Sessions", "Sudo version"
+        ],
+        "Processes, Cron & Services": [
+            "Processes Information", "Processes & Cron", "Services Information", 
+            "Systemd", "Cron", "Scheduled Tasks", "Autoruns", "Running Processes", 
+            "Binary processes", "Timers", "Sockets"
+        ],
+        "Software & Containers": [
+            "Software Information", "Installed Software", "Compiler", "Container", 
+            "Docker", "Kubernetes", "LXC", "Useful Software"
+        ],
+        "Platform & Cloud": [
+            "Cloud", "AWS", "GCP", "Azure", "EC2", "Metadata"
+        ],
+        "Storage & Mounts": [
+            "Mount points", "Disk space", "LVM information", "Partitions", 
+            "Drives", "NFS exports"
+        ],
+        "Files & Permissions": [
+            "File Information", "Interesting Files", "Registry Information", 
+            "Writable Files", "Capabilities", "SUID", "SGID", "Permission"
+        ],
+        "Credentials & Secrets": [
+            "Searching passwords", "Credentials", "API Keys", "Passwords", "Identities", 
+            "SSH Keys", "History Files", "Browser", "Mails", "GPG keys", "Keyring", "Clipboard"
+        ],
+        "Vulnerabilities & Exploits": [
+            "Exploits", "CVE", "Vulnerability", "Probes", "Exploit Suggester"
+        ]
     }
 
     @classmethod
@@ -106,9 +148,9 @@ class PeasParser:
         self.clean_content = self.converter.strip(content)
         self.sections = OrderedDict()
         self.categorized_sections = OrderedDict()
-        self.findings = []
+        self.findings = [] # Flattened list of findings
+        self.section_findings = {} # Map section_id -> list of findings
         self.hostname = "unknown"
-        # Map section titles to IDs for linking findings
         self.section_ids = {}
 
     def parse(self):
@@ -177,24 +219,24 @@ class PeasParser:
             idx += 1
 
     def _extract_findings_contextual(self):
-        """Identifies findings within the context of their sections."""
+        """Identifies findings and groups them by section."""
         self.findings = []
+        self.section_findings = {} # Reset
         
-        # Iterate sections to maintain context
         for title, content in self.sections.items():
             lines = content.splitlines()
+            sec_id = self.section_ids.get(title, "")
+            current_section_findings = []
+            
             for line in lines:
                 found = False
                 level = ""
                 
-                # Critical: Red/Yellow (1;31;103m) or White/Red (1;37;41m)
                 if '1;31;103m' in line or '1;37;41m' in line:
                     level = 'critical'
                     found = True
-                # High: Red (1;31m)
                 elif '1;31m' in line:
                     clean = self.converter.strip(line).strip()
-                    # Filter out common false positives for "High" red text
                     if "Scan" not in clean and "started" not in clean and len(clean) < 300:
                         level = 'high'
                         found = True
@@ -202,12 +244,17 @@ class PeasParser:
                 if found:
                     clean_text = self.converter.strip(line).strip()
                     if clean_text:
-                        self.findings.append({
+                        finding_obj = {
                             'level': level,
                             'text': clean_text,
                             'section': title,
-                            'section_id': self.section_ids.get(title, "")
-                        })
+                            'section_id': sec_id
+                        }
+                        self.findings.append(finding_obj)
+                        current_section_findings.append(finding_obj)
+            
+            if current_section_findings:
+                self.section_findings[title] = current_section_findings
 
 
 class ReportGenerator:
@@ -255,7 +302,6 @@ class ReportGenerator:
         for category_name, sections in self.parser.categorized_sections.items():
             if not sections: continue
             
-            # Use details/summary for accordion effect
             toc_html.append(f'''
             <li class="category-group">
                 <details open>
@@ -268,9 +314,12 @@ class ReportGenerator:
                 safe_title = html.escape(title)
                 sec_id = self.parser.section_ids[title]
                 
-                toc_html.append(f'<li><a href="#{sec_id}">{safe_title}</a></li>')
+                # Check if this section has findings for TOC indicator
+                has_findings = title in self.parser.section_findings
+                indicator = '<span class="toc-finding-dot"></span>' if has_findings else ''
                 
-                # Build Content Section
+                toc_html.append(f'<li><a href="#{sec_id}">{safe_title} {indicator}</a></li>')
+                
                 colored_content = converter.to_html(content)
                 content_html.append(f'''
                     <section id="{sec_id}" class="report-section">
@@ -285,19 +334,32 @@ class ReportGenerator:
             
             toc_html.append('</ul></details></li>')
 
-        # Build Contextual Findings Panel
+        # Build Grouped Findings Panel (Section Cards)
         findings_html = []
-        if not self.parser.findings:
+        if not self.parser.section_findings:
              findings_html.append('<div class="finding-card empty">No critical findings automatically detected.</div>')
         else:
-            for f in self.parser.findings:
+            # Sort sections by finding severity/count if desired, but here we iterate existing order
+            for title, findings_list in self.parser.section_findings.items():
+                sec_id = self.parser.section_ids[title]
+                crit_count = sum(1 for f in findings_list if f['level'] == 'critical')
+                high_count = sum(1 for f in findings_list if f['level'] == 'high')
+                
+                # Determine card accent color
+                card_class = "critical" if crit_count > 0 else "high"
+                
                 findings_html.append(f'''
-                <div class="finding-card {f['level']}" onclick="scrollToSection('{f['section_id']}')">
+                <div class="finding-card {card_class}" onclick="scrollToSection('{sec_id}')">
                     <div class="finding-header">
-                        <span class="badge {f['level']}">{f['level'].upper()}</span>
-                        <span class="finding-location">in {html.escape(f['section'])}</span>
+                        <span class="section-name">{html.escape(title)}</span>
                     </div>
-                    <div class="finding-body">{html.escape(f['text'])}</div>
+                    <div class="finding-stats">
+                        {f'<span class="badge critical">{crit_count} Critical</span>' if crit_count else ''}
+                        {f'<span class="badge high">{high_count} High</span>' if high_count else ''}
+                    </div>
+                    <div class="finding-footer">
+                        Click to view details &rarr;
+                    </div>
                 </div>
                 ''')
 
@@ -320,51 +382,48 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         :root {{ --bg: #0f0f12; --text: #e0e0e0; --accent: #00ff00; --panel: #1a1a1f; --border: #333; --critical: #ff5555; --high: #ffb86c; }}
         body {{ background: var(--bg); color: var(--text); font-family: 'Segoe UI', 'Consolas', monospace; margin: 0; display: flex; height: 100vh; overflow: hidden; }}
         
-        /* Sidebar */
-        aside {{ width: 320px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; user-select: none; }}
+        aside {{ width: 340px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; user-select: none; }}
         .brand {{ padding: 20px; font-size: 1.4em; color: var(--accent); font-weight: bold; border-bottom: 1px solid var(--border); letter-spacing: 1px; }}
         nav {{ flex: 1; overflow-y: auto; padding: 10px; }}
         nav ul {{ list-style: none; padding: 0; margin: 0; }}
         
-        /* Accordion Sidebar */
         details {{ margin-bottom: 5px; }}
         summary {{ cursor: pointer; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 4px; font-weight: bold; font-size: 0.9em; list-style: none; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }}
         summary:hover {{ background: rgba(255,255,255,0.08); color: #fff; }}
         summary::-webkit-details-marker {{ display: none; }}
-        summary::after {{ content: '+'; font-weight: normal; color: #666; }}
-        details[open] summary::after {{ content: '-'; }}
-        details[open] summary {{ color: var(--accent); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }}
+        details[open] summary {{ color: var(--accent); }}
         
-        details ul {{ background: rgba(0,0,0,0.2); padding: 5px 0; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }}
-        details li a {{ display: block; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
+        details li a {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
         details li a:hover {{ color: white; background: rgba(255,255,255,0.05); }}
+        .toc-finding-dot {{ width: 8px; height: 8px; background: var(--high); border-radius: 50%; box-shadow: 0 0 5px var(--high); }}
         
         .count {{ font-size: 0.8em; opacity: 0.5; font-weight: normal; background: #333; padding: 2px 6px; border-radius: 10px; }}
         
-        /* Main Area */
         main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; }}
         header {{ padding: 15px 30px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }}
         .tabs button {{ background: transparent; border: none; color: #888; padding: 8px 16px; cursor: pointer; font-size: 1em; border-radius: 4px; transition: 0.2s; font-weight: bold; }}
         .tabs button.active {{ color: var(--bg); background: var(--accent); }}
+        .meta-info {{ font-size: 0.85em; color: #666; }}
         
         .view {{ display: none; flex: 1; overflow-y: auto; padding: 30px; scroll-behavior: smooth; }}
         .view.active {{ display: block; }}
         
-        /* Findings Panel */
-        #findings-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; margin-bottom: 40px; }}
-        .finding-card {{ background: #25252b; border: 1px solid #444; border-radius: 6px; padding: 15px; cursor: pointer; transition: transform 0.2s, border-color 0.2s; }}
-        .finding-card:hover {{ transform: translateY(-2px); border-color: #666; }}
-        .finding-card.critical {{ border-top: 3px solid var(--critical); }}
-        .finding-card.high {{ border-top: 3px solid var(--high); }}
+        /* New Grouped Findings Grid */
+        #findings-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; margin-bottom: 40px; }}
         
-        .finding-header {{ display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.8em; }}
-        .badge {{ padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #000; }}
+        .finding-card {{ background: #25252b; border: 1px solid #444; border-radius: 8px; padding: 20px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 10px; }}
+        .finding-card:hover {{ transform: translateY(-3px); border-color: #777; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }}
+        .finding-card.critical {{ border-top: 4px solid var(--critical); }}
+        .finding-card.high {{ border-top: 4px solid var(--high); }}
+        
+        .finding-header {{ font-weight: bold; font-size: 1.1em; color: #fff; margin-bottom: 5px; }}
+        .finding-stats {{ display: flex; gap: 10px; }}
+        .badge {{ padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8em; color: #000; }}
         .badge.critical {{ background: var(--critical); }}
         .badge.high {{ background: var(--high); }}
-        .finding-location {{ color: #888; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }}
-        .finding-body {{ font-family: 'Consolas', monospace; font-size: 0.9em; line-height: 1.4; color: #ddd; word-break: break-all; }}
         
-        /* Report Content */
+        .finding-footer {{ font-size: 0.8em; color: #666; margin-top: auto; text-align: right; }}
+        
         .report-section {{ margin-bottom: 50px; scroll-margin-top: 20px; }}
         .section-header {{ display: flex; align-items: center; gap: 15px; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }}
         .section-category {{ font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; color: #666; border: 1px solid #333; padding: 4px 8px; border-radius: 4px; }}
@@ -373,13 +432,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         pre.content {{ white-space: pre-wrap; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; }}
         
-        /* Terminal */
         #terminal-view {{ background: #000; padding: 20px; }}
         #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; }}
-        
         #loading {{ position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: #000; padding: 10px 20px; border-radius: 20px; font-weight: bold; display: none; }}
         
-        /* Scrollbars */
         ::-webkit-scrollbar {{ width: 8px; }}
         ::-webkit-scrollbar-track {{ background: #0f0f12; }}
         ::-webkit-scrollbar-thumb {{ background: #333; border-radius: 4px; }}
@@ -445,7 +501,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const el = document.getElementById(id);
             if (el) {{
                 el.scrollIntoView({{behavior: 'smooth', block: 'start'}});
-                // Flash effect
                 el.style.transition = 'background 0.5s';
                 el.style.background = 'rgba(0, 255, 0, 0.1)';
                 setTimeout(() => el.style.background = '', 1000);
