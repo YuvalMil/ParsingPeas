@@ -199,13 +199,23 @@ def upload():
             f.write(data)
         log(f"[+] File saved successfully")
         
-        # Parse and generate HTML report
+        # Parse and generate HTML report using correct parser classes
         log(f"[*] Generating HTML report...")
-        from parser import generate_html_report
-        report_path = generate_html_report(filepath, hostname, scan_type)
+        from parser import PeasParser, ReportGenerator
         
-        report_url = f"http://{request.host}/reports/{os.path.basename(report_path)}"
-        log(f"[+] Report generated: {os.path.basename(report_path)}")
+        # Read the file content
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        
+        # Parse and generate report
+        parser = PeasParser(content)
+        parser.parse()
+        generator = ReportGenerator(parser, REPORTS_DIR)
+        report_filename = generator.generate()
+        report_path = os.path.join(REPORTS_DIR, report_filename)
+        
+        report_url = f"http://{request.host}/reports/{report_filename}"
+        log(f"[+] Report generated: {report_filename}")
         log(f"[+] View at: {report_url}")
         
         # Prepare response
@@ -215,7 +225,7 @@ def upload():
             'filename': filename,
             'size': file_size,
             'checksum': checksum,
-            'report_url': f"/reports/{os.path.basename(report_path)}"
+            'report_url': f"/reports/{report_filename}"
         }
         
         log(f"[*] Sending response to client...")
