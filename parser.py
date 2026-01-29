@@ -499,6 +499,10 @@ class ReportGenerator:
             sections_with_crit = 0
             sections_with_high = 0
             for title in sections.keys():
+                # Skip "General Information" from report summary
+                if title == "General Information":
+                    continue
+                    
                 if title in self.parser.section_findings:
                     findings = self.parser.section_findings[title]
                     has_critical = any(f['level'] == 'critical' for f in findings)
@@ -518,17 +522,26 @@ class ReportGenerator:
                     parts.append(f"<span class='stat-high'>{sections_with_high}H</span>")
                 stats_badge = f"<span class='cat-stats'>{' '.join(parts)}</span>"
 
+            # Count sections for display (excluding General Information)
+            visible_sections = [t for t in sections.keys() if t != "General Information"]
+            if not visible_sections:
+                continue
+
             toc_html.append(f'''
             <li class="category-group">
                 <details open>
                     <summary>
-                        <span>{html.escape(category_name)} <span class="count">{len(sections)}</span></span>
+                        <span>{html.escape(category_name)} <span class="count">{len(visible_sections)}</span></span>
                         {stats_badge}
                     </summary>
                     <ul>
             ''')
 
             for title, content in sections.items():
+                # Skip "General Information" from report summary (still in terminal view)
+                if title == "General Information":
+                    continue
+                    
                 if not content.strip():
                     continue
                 safe_title = html.escape(title)
