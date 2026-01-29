@@ -55,6 +55,14 @@ fi
 
 echo "[+] Downloaded successfully"
 
+# Patch linpeas to use non-interactive sudo (prevents password prompt hangs)
+if [[ $SCAN_TYPE == "linpeas" ]]; then
+    echo "[*] Patching linpeas for non-interactive mode..."
+    sed -i 's/sudo -l/sudo -n -l 2>\/dev\/null/g' "$SCRIPT_PATH"
+    sed -i 's/sudo -v/sudo -n -v 2>\/dev\/null/g' "$SCRIPT_PATH"
+    echo "[+] Patching complete"
+fi
+
 # Make executable and run
 if [[ $SCAN_TYPE == "linpeas" ]]; then
     chmod +x "$SCRIPT_PATH"
