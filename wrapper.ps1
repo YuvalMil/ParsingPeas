@@ -90,22 +90,13 @@ try {
     $Process.Start() | Out-Null
     Write-Output-Color "[*] Winpeas running (PID: $($Process.Id))..." "Yellow"
     
-    # Track sections for real progress
-    $SectionCount = 0
-    $TotalEstimatedSections = 38  # Winpeas typically has 35-40 major sections
-    
-    # Start async reading with section counting
+    # Start async reading
     $OutputBuilder = New-Object System.Text.StringBuilder
     $ErrorBuilder = New-Object System.Text.StringBuilder
     
     $OutputEventHandler = {
         if ($EventArgs.Data -ne $null) {
             [void]$Event.MessageData.AppendLine($EventArgs.Data)
-            
-            # Count winpeas section headers (they start with ╔═════════╣)
-            if ($EventArgs.Data -match '╔═+╣') {
-                $script:SectionCount++
-            }
         }
     }
     
@@ -126,13 +117,17 @@ try {
     $StartTime = Get-Date
     $LastUpdate = $StartTime
     $LastSectionCount = 0
+    $TotalEstimatedSections = 38
     
     while (-not $Process.HasExited) {
         $Now = Get-Date
         $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # Get current section count from the event handler's script scope
-        $CurrentSections = $SectionCount
+        # Count sections by parsing accumulated output
+        # Winpeas uses patterns like: "╔═══════" or "====" for section headers
+        $CurrentOutput = $OutputBuilder.ToString()
+        $SectionMatches = [regex]::Matches($CurrentOutput, '(╔═+╣|═{20,})')
+        $CurrentSections = $SectionMatches.Count
         
         # Calculate real progress based on sections
         if ($CurrentSections -gt 0) {
@@ -146,7 +141,7 @@ try {
         if (-not $IsInteractive) {
             if (($Now - $LastUpdate).TotalSeconds -ge 10 -or $CurrentSections -ne $LastSectionCount) {
                 if ($CurrentSections -gt 0) {
-                    Write-Output "[*] Progress: $CurrentSections/$TotalEstimatedSections sections ($Elapsed sec)"
+                    Write-Output "[*] Progress: $CurrentSections/$TotalEstimatedSections sections (~$ProgressPercent%, $Elapsed sec)"
                 } else {
                     Write-Output "[*] Still running... ($Elapsed seconds elapsed)"
                 }
@@ -172,6 +167,11 @@ try {
     $Process.WaitForExit()
     $ExitCode = $Process.ExitCode
     
+    # Final section count
+    $FinalOutput = $OutputBuilder.ToString()
+    $FinalMatches = [regex]::Matches($FinalOutput, '(╔═+╣|═{20,})')
+    $FinalSectionCount = $FinalMatches.Count
+    
     # Cleanup events
     Unregister-Event -SourceIdentifier $OutputEvent.Name
     Unregister-Event -SourceIdentifier $ErrorEvent.Name
@@ -179,9 +179,9 @@ try {
     Remove-Job -Id $ErrorEvent.Id -Force
     
     if ($IsInteractive) {
-        Write-Host "`r[+] Progress: [====================] 100% | Complete! ($SectionCount sections)" -ForegroundColor Green
+        Write-Host "`r[+] Progress: [====================] 100% | Complete! ($FinalSectionCount sections)" -ForegroundColor Green
     } else {
-        Write-Output "[+] Complete! ($SectionCount sections processed)"
+        Write-Output "[+] Complete! ($FinalSectionCount sections processed)"
     }
     Write-Output-Safe ""
     
