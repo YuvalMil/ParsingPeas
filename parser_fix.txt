@@ -1,7 +1,0 @@
-Line 284 fix:
-
-Change from:
-f'<div class="sec" id="s{{i}}''>'
-
-To:
-f'<div class="sec" id="s{i}">'
