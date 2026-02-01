@@ -72,15 +72,19 @@ if (-not (Test-Path $ScriptPath) -or (Get-Item $ScriptPath).Length -eq 0) {
 Write-Output-Color "[+] Downloaded successfully" "Green"
 
 Write-Output-Color "[*] Running winpeas (this may take 2-5 minutes)..." "Yellow"
+Write-Output-Color "[*] Winpeas may appear stuck for 30-60s during initial enumeration" "Yellow"
 Write-Output-Color "[*] Output is being saved to file..." "Yellow"
 Write-Output-Safe ""
 
-# Create synchronized hashtable for cross-runspace byte tracking
-$SyncHash = [hashtable]::Synchronized(@{
-    ByteCount = 0
-})
+# Create empty file for real-time writing
+[System.IO.File]::WriteAllText($TmpOutput, "")
 
-# Run winpeas and capture output with accurate byte tracking
+# Create stream writer for real-time file writing
+$FileStream = [System.IO.File]::Open($TmpOutput, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+$StreamWriter = New-Object System.IO.StreamWriter($FileStream)
+$StreamWriter.AutoFlush = $true
+
+# Run winpeas and capture output with real-time file writing
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -95,7 +99,7 @@ try {
     $Process.Start() | Out-Null
     Write-Output-Color "[*] Winpeas running (PID: $($Process.Id))..." "Yellow"
     
-    # Start async reading with byte counting
+    # Start async reading with real-time file writing
     $OutputBuilder = New-Object System.Text.StringBuilder
     $ErrorBuilder = New-Object System.Text.StringBuilder
     
@@ -103,30 +107,29 @@ try {
         if ($EventArgs.Data -ne $null) {
             $Line = $EventArgs.Data
             [void]$Event.MessageData.StringBuilder.AppendLine($Line)
-            # Calculate and add byte count for this line (UTF-8 encoding)
-            $LineBytes = [Text.Encoding]::UTF8.GetByteCount($Line) + 1  # +1 for newline
-            $Event.MessageData.SyncHash.ByteCount += $LineBytes
+            # Write to file in real-time
+            try {
+                $Event.MessageData.Writer.WriteLine($Line)
+            } catch {
+                # Ignore write errors
+            }
         }
     }
     
     $ErrorEventHandler = {
         if ($EventArgs.Data -ne $null) {
             $Line = $EventArgs.Data
-            [void]$Event.MessageData.StringBuilder.AppendLine($Line)
-            # Count error bytes too
-            $LineBytes = [Text.Encoding]::UTF8.GetByteCount($Line) + 1
-            $Event.MessageData.SyncHash.ByteCount += $LineBytes
+            [void]$Event.MessageData.ErrorBuilder.AppendLine($Line)
         }
     }
     
-    # Pass both StringBuilder and SyncHash to event handlers
+    # Pass StreamWriter to event handler
     $OutputData = @{
         StringBuilder = $OutputBuilder
-        SyncHash = $SyncHash
+        Writer = $StreamWriter
     }
     $ErrorData = @{
-        StringBuilder = $ErrorBuilder
-        SyncHash = $SyncHash
+        ErrorBuilder = $ErrorBuilder
     }
     
     $OutputEvent = Register-ObjectEvent -InputObject $Process `
@@ -142,41 +145,76 @@ try {
     $Process.BeginOutputReadLine()
     $Process.BeginErrorReadLine()
     
-    # Show progress while winpeas is running
+    # Show progress while winpeas is running - track actual file size
     $StartTime = Get-Date
     $LastUpdate = $StartTime
     $LastSize = 0
+    $StuckCount = 0
     
     while (-not $Process.HasExited) {
         $Now = Get-Date
         $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # Get current byte count from synchronized hashtable
-        $CurrentSize = $SyncHash.ByteCount
+        # Get current file size (actual bytes on disk)
+        $CurrentSize = 0
+        if (Test-Path $TmpOutput) {
+            try {
+                $FileInfo = Get-Item $TmpOutput
+                $CurrentSize = $FileInfo.Length
+            } catch {
+                # File might be locked, use last known size
+                $CurrentSize = $LastSize
+            }
+        }
         $CurrentKB = [Math]::Round($CurrentSize / 1KB, 1)
+        
+        # Detect if stuck (no progress)
+        if ($CurrentSize -eq $LastSize) {
+            $StuckCount++
+        } else {
+            $StuckCount = 0
+        }
         
         # Non-interactive mode: periodic text updates
         if (-not $IsInteractive) {
-            if (($Now - $LastUpdate).TotalSeconds -ge 10 -or $CurrentSize -ne $LastSize) {
-                Write-Output "[*] Running... $Elapsed sec | Output: $CurrentKB KB"
+            if (($Now - $LastUpdate).TotalSeconds -ge 10) {
+                if ($StuckCount -ge 20) {
+                    # No progress for 10 seconds
+                    Write-Output "[*] Running... $Elapsed sec | Output: $CurrentKB KB (enumeration in progress)"
+                } else {
+                    Write-Output "[*] Running... $Elapsed sec | Output: $CurrentKB KB"
+                }
                 $LastUpdate = $Now
-                $LastSize = $CurrentSize
             }
         } else {
             # Interactive mode: live display
             $Minutes = [Math]::Floor($Elapsed / 60)
             $Seconds = $Elapsed % 60
-            Write-Host "`r[*] Running: $Minutes`:$($Seconds.ToString('00')) | Output: $CurrentKB KB" -NoNewline -ForegroundColor Cyan
+            if ($StuckCount -ge 20) {
+                Write-Host "`r[*] Running: $Minutes`:$($Seconds.ToString('00')) | Output: $CurrentKB KB (enumerating...)" -NoNewline -ForegroundColor Yellow
+            } else {
+                Write-Host "`r[*] Running: $Minutes`:$($Seconds.ToString('00')) | Output: $CurrentKB KB" -NoNewline -ForegroundColor Cyan
+            }
         }
         
+        $LastSize = $CurrentSize
         Start-Sleep -Milliseconds 500
     }
     
     $Process.WaitForExit()
     $ExitCode = $Process.ExitCode
     
+    # Close stream writer
+    $StreamWriter.Close()
+    $StreamWriter.Dispose()
+    $FileStream.Close()
+    $FileStream.Dispose()
+    
     # Get final size
-    $FinalSize = $SyncHash.ByteCount
+    $FinalSize = 0
+    if (Test-Path $TmpOutput) {
+        $FinalSize = (Get-Item $TmpOutput).Length
+    }
     $FinalKB = [Math]::Round($FinalSize / 1KB, 1)
     
     # Cleanup events
@@ -186,28 +224,27 @@ try {
     Remove-Job -Id $ErrorEvent.Id -Force
     
     if ($IsInteractive) {
-        Write-Host "`r[+] Complete! | Output: $FinalKB KB" -NoNewline -ForegroundColor Green
+        Write-Host "`r[+] Complete! | Output: $FinalKB KB                                    " -ForegroundColor Green
     }
     Write-Output-Safe ""
     Write-Output-Safe ""
     
-    # Combine output and errors
-    $Output = $OutputBuilder.ToString()
+    # Append errors to file if any
     $ErrorOutput = $ErrorBuilder.ToString()
-    
-    $FullOutput = $Output
     if ($ErrorOutput) {
-        $FullOutput += "`n`n=== STDERR ===`n" + $ErrorOutput
+        [System.IO.File]::AppendAllText($TmpOutput, "`n`n=== STDERR ===`n" + $ErrorOutput)
     }
-    
-    # Save to temp file
-    [System.IO.File]::WriteAllText($TmpOutput, $FullOutput)
     
     Write-Output-Color "[+] Winpeas completed with exit code: $ExitCode" "Green"
     
 } catch {
     Write-Output-Color "[!] Error running winpeas: $_" "Red"
     Write-Output-Color "[!] Exception: $($_.Exception.Message)" "Red"
+    # Clean up streams if they exist
+    try {
+        if ($StreamWriter) { $StreamWriter.Dispose() }
+        if ($FileStream) { $FileStream.Dispose() }
+    } catch {}
     exit 1
 }
 
