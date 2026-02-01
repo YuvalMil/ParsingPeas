@@ -299,8 +299,15 @@ class PeasParser:
 
     def _is_section_header(self, raw_line, clean_line):
         """Detect if a line is a section header (with or without ANSI codes)."""
-        # Check for box-drawing characters (common in winpeas/linpeas headers)
-        if any(c in raw_line for c in '╔═══╗'):
+        # Standard Unicode box-drawing characters
+        box_chars = '╔═══╗╚╝║─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋'
+        
+        # Corrupted box-drawing characters (appear as Thai when encoding is wrong)
+        # Common in: winpeas.exe > output.txt
+        corrupted_box_chars = 'อฬนษศ'  # อ ฬ น ษ ศ
+        
+        # Check for any box-drawing characters (standard or corrupted)
+        if any(c in raw_line for c in box_chars + corrupted_box_chars):
             return True
         
         # Check for [+] or [-] patterns that look like headers
@@ -311,8 +318,9 @@ class PeasParser:
         
         # Check for lines that are mostly symbols (separator lines)
         if len(clean_line) > 10:
-            symbol_chars = sum(1 for c in clean_line if c in '═╔╗╚╝║─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋')
-            if symbol_chars / len(clean_line) > 0.5:
+            all_box_chars = box_chars + corrupted_box_chars
+            symbol_chars = sum(1 for c in clean_line if c in all_box_chars)
+            if symbol_chars / len(clean_line) > 0.3:  # Lower threshold for corrupted chars
                 return True
         
         return False
@@ -347,7 +355,10 @@ class PeasParser:
                     buffer = []
 
                 # Extract clean title from header
-                title = clean_line.translate(str.maketrans('', '', '╔╗╚╝║═[]+-')).strip()
+                # Remove both standard and corrupted box-drawing characters
+                box_chars = '╔╗╚╝║═[]+-'
+                corrupted_chars = 'อฬนษศ'  # อ ฬ น ษ ศ
+                title = clean_line.translate(str.maketrans('', '', box_chars + corrupted_chars)).strip()
                 if title:
                     current_header = title
                 buffer.append(line)
