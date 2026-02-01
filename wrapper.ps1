@@ -75,7 +75,7 @@ Write-Output-Color "[*] Running winpeas (this may take 2-5 minutes)..." "Yellow"
 Write-Output-Color "[*] Output is being saved to file..." "Yellow"
 Write-Output-Safe ""
 
-# Run winpeas and capture output
+# Run winpeas and capture output with REAL progress tracking
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -90,13 +90,22 @@ try {
     $Process.Start() | Out-Null
     Write-Output-Color "[*] Winpeas running (PID: $($Process.Id))..." "Yellow"
     
-    # Start async reading to prevent buffer deadlock
+    # Track sections for real progress
+    $SectionCount = 0
+    $TotalEstimatedSections = 38  # Winpeas typically has 35-40 major sections
+    
+    # Start async reading with section counting
     $OutputBuilder = New-Object System.Text.StringBuilder
     $ErrorBuilder = New-Object System.Text.StringBuilder
     
     $OutputEventHandler = {
         if ($EventArgs.Data -ne $null) {
             [void]$Event.MessageData.AppendLine($EventArgs.Data)
+            
+            # Count winpeas section headers (they start with ╔═════════╣)
+            if ($EventArgs.Data -match '╔═+╣') {
+                $script:SectionCount++
+            }
         }
     }
     
@@ -116,25 +125,45 @@ try {
     # Show progress while winpeas is running
     $StartTime = Get-Date
     $LastUpdate = $StartTime
+    $LastSectionCount = 0
     
     while (-not $Process.HasExited) {
         $Now = Get-Date
         $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # In non-interactive mode, show periodic updates instead of progress bar
+        # Get current section count from the event handler's script scope
+        $CurrentSections = $SectionCount
+        
+        # Calculate real progress based on sections
+        if ($CurrentSections -gt 0) {
+            $ProgressPercent = [Math]::Min(95, [int](($CurrentSections / $TotalEstimatedSections) * 100))
+        } else {
+            # Fallback to time-based for first few seconds
+            $ProgressPercent = [Math]::Min(10, [int](($Elapsed / 120) * 100))
+        }
+        
+        # Non-interactive mode: periodic text updates
         if (-not $IsInteractive) {
-            if (($Now - $LastUpdate).TotalSeconds -ge 10) {
-                Write-Output "[*] Still running... ($Elapsed seconds elapsed)"
+            if (($Now - $LastUpdate).TotalSeconds -ge 10 -or $CurrentSections -ne $LastSectionCount) {
+                if ($CurrentSections -gt 0) {
+                    Write-Output "[*] Progress: $CurrentSections/$TotalEstimatedSections sections ($Elapsed sec)"
+                } else {
+                    Write-Output "[*] Still running... ($Elapsed seconds elapsed)"
+                }
                 $LastUpdate = $Now
+                $LastSectionCount = $CurrentSections
             }
         } else {
-            # Interactive mode: show progress bar
+            # Interactive mode: fancy progress bar
             $Minutes = [Math]::Floor($Elapsed / 60)
             $Seconds = $Elapsed % 60
-            $EstimatedDuration = 120
-            $ProgressPercent = [Math]::Min(95, [int](($Elapsed / $EstimatedDuration) * 100))
             $ProgressBar = "[" + ("=" * [int]($ProgressPercent / 5)) + (" " * (20 - [int]($ProgressPercent / 5))) + "]"
-            Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
+            
+            if ($CurrentSections -gt 0) {
+                Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Sections: $CurrentSections/$TotalEstimatedSections | $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
+            } else {
+                Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
+            }
         }
         
         Start-Sleep -Milliseconds 500
@@ -150,7 +179,9 @@ try {
     Remove-Job -Id $ErrorEvent.Id -Force
     
     if ($IsInteractive) {
-        Write-Host "`r[+] Progress: [====================] 100% | Complete!" -ForegroundColor Green
+        Write-Host "`r[+] Progress: [====================] 100% | Complete! ($SectionCount sections)" -ForegroundColor Green
+    } else {
+        Write-Output "[+] Complete! ($SectionCount sections processed)"
     }
     Write-Output-Safe ""
     
