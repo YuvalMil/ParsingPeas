@@ -152,7 +152,7 @@ class CategoryManager:
         "System Information": [
             "Basic information", "System Information", "OS Information", "Environment",
             "Operative system", "Hostname", "Env", "Version", "Date & uptime", "PATH",
-            "linuxONE", "Syslog configuration"
+            "linuxONE", "Syslog configuration", "Basic System Information"
         ],
         "Kernel & Hardware": [
             "Kernel", "Loaded modules", "PCI devices", "USB devices",
@@ -258,7 +258,6 @@ class PeasParser:
     def _strip_initial_banner(self):
         """Remove the *ASCII art logo* but keep the PEASS credit box."""
         lines = self.raw_content.splitlines()
-        header_ansi_pattern = '\x1b[1;32m'
 
         # Prefer keeping the "Do you like PEASS?" box if present
         box_line_idx = None
@@ -288,20 +287,35 @@ class PeasParser:
         # Fallback: if no box found, strip everything before the first real section header
         for i, line in enumerate(lines):
             clean_line = self.converter.strip(line).strip()
-            is_header = False
-
-            if header_ansi_pattern in line:
-                if any(c in line for c in '╔═══'):
-                    is_header = True
-                elif clean_line.startswith('[+]') or clean_line.startswith('[-]'):
-                    if len(clean_line) < 80 and not clean_line.endswith(':'):
-                        is_header = True
+            
+            # Check if this looks like a section header (with or without ANSI)
+            is_header = self._is_section_header(line, clean_line)
 
             if is_header:
                 if i > 0:
                     self.raw_content = "\n".join(lines[i:])
                     self.clean_content = self.converter.strip(self.raw_content)
                 return
+
+    def _is_section_header(self, raw_line, clean_line):
+        """Detect if a line is a section header (with or without ANSI codes)."""
+        # Check for box-drawing characters (common in winpeas/linpeas headers)
+        if any(c in raw_line for c in '╔═══╗'):
+            return True
+        
+        # Check for [+] or [-] patterns that look like headers
+        if clean_line.startswith('[+]') or clean_line.startswith('[-]'):
+            # Headers are usually short and don't end with colons
+            if len(clean_line) < 80 and not clean_line.endswith(':'):
+                return True
+        
+        # Check for lines that are mostly symbols (separator lines)
+        if len(clean_line) > 10:
+            symbol_chars = sum(1 for c in clean_line if c in '═╔╗╚╝║─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋')
+            if symbol_chars / len(clean_line) > 0.5:
+                return True
+        
+        return False
 
     def _extract_hostname(self):
         match = re.search(r'Hostname:\s*([\w\-\.]+)', self.clean_content, re.IGNORECASE)
@@ -317,17 +331,12 @@ class PeasParser:
         lines = self.raw_content.splitlines()
         current_header = "General Information"
         buffer = []
-        header_ansi_pattern = '\x1b[1;32m'
 
         for line in lines:
             clean_line = self.converter.strip(line).strip()
-            is_header = False
-            if header_ansi_pattern in line:
-                if any(c in line for c in '╔═══'):
-                    is_header = True
-                elif clean_line.startswith('[+]') or clean_line.startswith('[-]'):
-                    if len(clean_line) < 80 and not clean_line.endswith(':'):
-                        is_header = True
+            
+            # Use the improved header detection (works with or without ANSI)
+            is_header = self._is_section_header(line, clean_line)
 
             if is_header:
                 if buffer:
@@ -337,6 +346,7 @@ class PeasParser:
                         self.sections[current_header] = "\n".join(buffer)
                     buffer = []
 
+                # Extract clean title from header
                 title = clean_line.translate(str.maketrans('', '', '╔╗╚╝║═[]+-')).strip()
                 if title:
                     current_header = title
@@ -766,6 +776,8 @@ def main():
         report_path = generator.generate()
 
         print(f"[+] Report generated: {os.path.join(output_dir, report_path)}")
+        print(f"[*] Detected {len(parser.sections)} sections")
+        print(f"[*] Found {len(parser.findings)} findings")
 
     except Exception:
         import traceback
