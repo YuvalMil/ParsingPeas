@@ -235,6 +235,9 @@ class PeasParser:
     """Parses Linpeas/Winpeas output."""
 
     ANSI_SGR_RE = re.compile(r'\x1b\[([\d;]*)m')
+    
+    # Section header color pattern: cyan (1;36m) followed by green (1;32m)
+    HEADER_COLOR_PATTERN = re.compile(r'\x1b\[1;36m.*?\x1b\[1;32m')
 
     def __init__(self, content):
         self.raw_content = content
@@ -268,12 +271,13 @@ class PeasParser:
                 break
 
         if box_line_idx is not None:
-            # Walk backwards to capture the full box border (usually uses box-drawing chars)
+            # Walk backwards to capture the full box border
             j = box_line_idx
             steps = 0
             while j > 0 and steps < 15:
                 prev = lines[j - 1]
-                if any(ch in prev for ch in '╔╗╚╝║═'):
+                # Look for box-drawing or color pattern
+                if any(ch in prev for ch in '╔╗╚╝║═') or '\x1b[1;36m' in prev:
                     j -= 1
                     steps += 1
                     continue
@@ -284,43 +288,37 @@ class PeasParser:
                 self.clean_content = self.converter.strip(self.raw_content)
             return
 
-        # Fallback: if no box found, strip everything before the first real section header
+        # Fallback: strip everything before the first real section header
         for i, line in enumerate(lines):
-            clean_line = self.converter.strip(line).strip()
-            
-            # Check if this looks like a section header (with or without ANSI)
-            is_header = self._is_section_header(line, clean_line)
-
-            if is_header:
+            if self._is_section_header(line):
                 if i > 0:
                     self.raw_content = "\n".join(lines[i:])
                     self.clean_content = self.converter.strip(self.raw_content)
                 return
 
-    def _is_section_header(self, raw_line, clean_line):
-        """Detect if a line is a section header (with or without ANSI codes)."""
-        # Standard Unicode box-drawing characters
-        box_chars = '╔═══╗╚╝║─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋'
-        
-        # Corrupted box-drawing characters (appear as Thai when encoding is wrong)
-        # Common in: winpeas.exe > output.txt
-        corrupted_box_chars = 'อฬนษศ'  # อ ฬ น ษ ศ
-        
-        # Check for any box-drawing characters (standard or corrupted)
-        if any(c in raw_line for c in box_chars + corrupted_box_chars):
+    def _is_section_header(self, line):
+        """
+        Detect if a line is a section header by ANSI color pattern.
+        Headers use: cyan (1;36m) for decoration + green (1;32m) for title.
+        This works regardless of character encoding corruption.
+        """
+        # Primary detection: cyan + green color pattern
+        if self.HEADER_COLOR_PATTERN.search(line):
             return True
         
-        # Check for [+] or [-] patterns that look like headers
+        # Fallback: standard Unicode box-drawing characters
+        box_chars = '╔═╗╚╝║─│┌┐└┘├┤┬┴┼'
+        if any(c in line for c in box_chars):
+            clean = self.converter.strip(line).strip()
+            # Headers usually have reasonable length
+            if len(clean) < 100 and clean:
+                return True
+        
+        # Fallback: [+] or [-] patterns that look like headers
+        clean_line = self.converter.strip(line).strip()
         if clean_line.startswith('[+]') or clean_line.startswith('[-]'):
             # Headers are usually short and don't end with colons
             if len(clean_line) < 80 and not clean_line.endswith(':'):
-                return True
-        
-        # Check for lines that are mostly symbols (separator lines)
-        if len(clean_line) > 10:
-            all_box_chars = box_chars + corrupted_box_chars
-            symbol_chars = sum(1 for c in clean_line if c in all_box_chars)
-            if symbol_chars / len(clean_line) > 0.3:  # Lower threshold for corrupted chars
                 return True
         
         return False
@@ -341,12 +339,8 @@ class PeasParser:
         buffer = []
 
         for line in lines:
-            clean_line = self.converter.strip(line).strip()
-            
-            # Use the improved header detection (works with or without ANSI)
-            is_header = self._is_section_header(line, clean_line)
-
-            if is_header:
+            if self._is_section_header(line):
+                # Save previous section
                 if buffer:
                     if current_header in self.sections:
                         self.sections[current_header] += "\n" + "\n".join(buffer)
@@ -354,17 +348,28 @@ class PeasParser:
                         self.sections[current_header] = "\n".join(buffer)
                     buffer = []
 
-                # Extract clean title from header
-                # Remove both standard and corrupted box-drawing characters
-                box_chars = '╔╗╚╝║═[]+-'
-                corrupted_chars = 'อฬนษศ'  # อ ฬ น ษ ศ
-                title = clean_line.translate(str.maketrans('', '', box_chars + corrupted_chars)).strip()
+                # Extract title from the green text portion (after \x1b[1;32m)
+                clean_line = self.converter.strip(line).strip()
+                
+                # Remove decorative characters (both standard and corrupted)
+                # Standard: ╔═╗╚╝║ etc
+                # Corrupted: ออน etc (Thai chars)
+                # Also remove common symbols: []+-
+                decorative_chars = '╔═╗╚╝║─│┌┐└┘├┤┬┴┼[]+-'
+                title = clean_line.translate(str.maketrans('', '', decorative_chars)).strip()
+                
+                # Additional cleanup: remove any remaining Thai/corrupted chars
+                # (they appear as non-ASCII in certain ranges)
+                title = ''.join(c for c in title if ord(c) < 0x0E00 or ord(c) > 0x0E7F)
+                title = title.strip()
+                
                 if title:
                     current_header = title
                 buffer.append(line)
             else:
                 buffer.append(line)
 
+        # Save last section
         if buffer:
             if current_header in self.sections:
                 self.sections[current_header] += "\n" + "\n".join(buffer)
