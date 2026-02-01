@@ -250,6 +250,12 @@ class PeasParser:
         self.hostname = "unknown"
         self.section_ids = {}
         self.seen_findings = set()
+        # Stats for reporting
+        self.stats = {
+            'sections_with_critical': 0,
+            'sections_with_high': 0,
+            'total_sections_with_findings': 0
+        }
 
     def parse(self):
         self._strip_initial_banner()
@@ -257,6 +263,7 @@ class PeasParser:
         self._extract_sections()
         self._organize_categories()
         self._extract_findings_contextual()
+        self._calculate_stats()
 
     def _strip_initial_banner(self):
         """Remove the *ASCII art logo* but keep the PEASS credit box."""
@@ -353,7 +360,7 @@ class PeasParser:
                 
                 # Remove decorative characters (both standard and corrupted)
                 # Standard: ╔═╗╚╝║ etc
-                # Corrupted: ออน etc (Thai chars)
+                # Corrupted: อออน etc (Thai chars)
                 # Also remove common symbols: []+-
                 decorative_chars = '╔═╗╚╝║─│┌┐└┘├┤┬┴┼[]+-'
                 title = clean_line.translate(str.maketrans('', '', decorative_chars)).strip()
@@ -474,6 +481,24 @@ class PeasParser:
 
             if current_section_findings:
                 self.section_findings[title] = current_section_findings
+
+    def _calculate_stats(self):
+        """Calculate statistics based on sections with findings, not individual lines."""
+        sections_with_critical = set()
+        sections_with_high = set()
+        
+        for title, findings in self.section_findings.items():
+            has_critical = any(f['level'] == 'critical' for f in findings)
+            has_high = any(f['level'] == 'high' for f in findings)
+            
+            if has_critical:
+                sections_with_critical.add(title)
+            elif has_high:
+                sections_with_high.add(title)
+        
+        self.stats['sections_with_critical'] = len(sections_with_critical)
+        self.stats['sections_with_high'] = len(sections_with_high)
+        self.stats['total_sections_with_findings'] = len(sections_with_critical) + len(sections_with_high)
 
 
 class ReportGenerator:
@@ -793,7 +818,19 @@ def main():
 
         print(f"[+] Report generated: {os.path.join(output_dir, report_path)}")
         print(f"[*] Detected {len(parser.sections)} sections")
-        print(f"[*] Found {len(parser.findings)} findings")
+        
+        # Display section-based statistics instead of line counts
+        stats = parser.stats
+        if stats['total_sections_with_findings'] > 0:
+            details = []
+            if stats['sections_with_critical'] > 0:
+                details.append(f"{stats['sections_with_critical']} critical")
+            if stats['sections_with_high'] > 0:
+                details.append(f"{stats['sections_with_high']} high")
+            
+            print(f"[*] Found {stats['total_sections_with_findings']} sections with findings ({', '.join(details)})")
+        else:
+            print("[*] No security findings detected")
 
     except Exception:
         import traceback
