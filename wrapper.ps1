@@ -75,7 +75,7 @@ Write-Output-Color "[*] Running winpeas (this may take 2-5 minutes)..." "Yellow"
 Write-Output-Color "[*] Output is being saved to file..." "Yellow"
 Write-Output-Safe ""
 
-# Run winpeas and capture output with REAL progress tracking
+# Run winpeas and capture output with progress tracking
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -116,49 +116,27 @@ try {
     # Show progress while winpeas is running
     $StartTime = Get-Date
     $LastUpdate = $StartTime
-    $LastSectionCount = 0
-    $TotalEstimatedSections = 38
     
     while (-not $Process.HasExited) {
         $Now = Get-Date
         $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # Count sections by parsing accumulated output
-        # Winpeas uses patterns like: "╔═══════" or "====" for section headers
-        $CurrentOutput = $OutputBuilder.ToString()
-        $SectionMatches = [regex]::Matches($CurrentOutput, '(╔═+╣|═{20,})')
-        $CurrentSections = $SectionMatches.Count
-        
-        # Calculate real progress based on sections
-        if ($CurrentSections -gt 0) {
-            $ProgressPercent = [Math]::Min(95, [int](($CurrentSections / $TotalEstimatedSections) * 100))
-        } else {
-            # Fallback to time-based for first few seconds
-            $ProgressPercent = [Math]::Min(10, [int](($Elapsed / 120) * 100))
-        }
+        # Time-based progress (reliable)
+        $EstimatedDuration = 120  # 2 minutes typical
+        $ProgressPercent = [Math]::Min(95, [int](($Elapsed / $EstimatedDuration) * 100))
         
         # Non-interactive mode: periodic text updates
         if (-not $IsInteractive) {
-            if (($Now - $LastUpdate).TotalSeconds -ge 10 -or $CurrentSections -ne $LastSectionCount) {
-                if ($CurrentSections -gt 0) {
-                    Write-Output "[*] Progress: $CurrentSections/$TotalEstimatedSections sections (~$ProgressPercent%, $Elapsed sec)"
-                } else {
-                    Write-Output "[*] Still running... ($Elapsed seconds elapsed)"
-                }
+            if (($Now - $LastUpdate).TotalSeconds -ge 10) {
+                Write-Output "[*] Still running... ($Elapsed seconds elapsed)"
                 $LastUpdate = $Now
-                $LastSectionCount = $CurrentSections
             }
         } else {
             # Interactive mode: fancy progress bar
             $Minutes = [Math]::Floor($Elapsed / 60)
             $Seconds = $Elapsed % 60
             $ProgressBar = "[" + ("=" * [int]($ProgressPercent / 5)) + (" " * (20 - [int]($ProgressPercent / 5))) + "]"
-            
-            if ($CurrentSections -gt 0) {
-                Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Sections: $CurrentSections/$TotalEstimatedSections | $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
-            } else {
-                Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
-            }
+            Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
         }
         
         Start-Sleep -Milliseconds 500
@@ -167,11 +145,6 @@ try {
     $Process.WaitForExit()
     $ExitCode = $Process.ExitCode
     
-    # Final section count
-    $FinalOutput = $OutputBuilder.ToString()
-    $FinalMatches = [regex]::Matches($FinalOutput, '(╔═+╣|═{20,})')
-    $FinalSectionCount = $FinalMatches.Count
-    
     # Cleanup events
     Unregister-Event -SourceIdentifier $OutputEvent.Name
     Unregister-Event -SourceIdentifier $ErrorEvent.Name
@@ -179,10 +152,9 @@ try {
     Remove-Job -Id $ErrorEvent.Id -Force
     
     if ($IsInteractive) {
-        Write-Host "`r[+] Progress: [====================] 100% | Complete! ($FinalSectionCount sections)" -ForegroundColor Green
-    } else {
-        Write-Output "[+] Complete! ($FinalSectionCount sections processed)"
+        Write-Host "`r[+] Progress: [====================] 100% | Complete!" -NoNewline -ForegroundColor Green
     }
+    Write-Output-Safe ""
     Write-Output-Safe ""
     
     # Combine output and errors
@@ -213,9 +185,22 @@ if (-not (Test-Path $TmpOutput) -or (Get-Item $TmpOutput).Length -eq 0) {
 
 $OutputSize = (Get-Item $TmpOutput).Length
 Write-Output-Color "[+] Final output size: $([Math]::Round($OutputSize / 1KB, 2)) KB" "Green"
-Write-Output-Safe ""
 
-# Skip tail display to avoid issues
+# Calculate MD5 checksum for verification
+Write-Output-Safe ""
+Write-Output-Color "[*] Calculating checksum..." "Yellow"
+try {
+    $MD5 = New-Object System.Security.Cryptography.MD5CryptoServiceProvider
+    $FileBytes = [System.IO.File]::ReadAllBytes($TmpOutput)
+    $Hash = $MD5.ComputeHash($FileBytes)
+    $Checksum = [BitConverter]::ToString($Hash).Replace("-", "").ToLower()
+    Write-Output-Color "[+] MD5 Checksum: $Checksum" "Green"
+} catch {
+    Write-Output-Color "[!] Warning: Could not calculate checksum" "Yellow"
+    $Checksum = "unknown"
+}
+
+Write-Output-Safe ""
 Write-Output-Color "[*] Output saved, preparing upload..." "Yellow"
 Write-Output-Safe ""
 
@@ -249,6 +234,7 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
         $WebClient.Headers.Add("X-Session-ID", $SessionId)
         $WebClient.Headers.Add("X-Hostname", $Hostname)
         $WebClient.Headers.Add("X-Scan-Type", $ScanType)
+        $WebClient.Headers.Add("X-Client-Checksum", $Checksum)
         $WebClient.Headers.Add("Content-Type", "text/plain")
         
         Write-Output-Color "[*] Reading file bytes..." "Cyan"
@@ -263,11 +249,19 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
         Write-Output-Color "[+] Upload complete!" "Green"
         Write-Output-Color "[+] Transfer successful!" "Green"
         
-        # Try to extract report URL from response
+        # Try to extract report URL and checksum from response
         try {
             if ($ResponseText -match '"report_url"\s*:\s*"([^"]+)"') {
                 $ReportUrl = $matches[1]
                 Write-Output-Color "[+] View report at: $ServerUrl$ReportUrl" "Green"
+            }
+            if ($ResponseText -match '"checksum"\s*:\s*"([^"]+)"') {
+                $ServerChecksum = $matches[1]
+                if ($ServerChecksum -eq $Checksum) {
+                    Write-Output-Color "[+] Checksum verified: Match!" "Green"
+                } else {
+                    Write-Output-Color "[!] Checksum mismatch! Client: $Checksum | Server: $ServerChecksum" "Red"
+                }
             }
         } catch {
             # Ignore parse errors
@@ -302,7 +296,8 @@ if ($Success) {
 } else {
     Write-Output-Color "[!] Transfer failed after $MaxRetries attempts" "Red"
     Write-Output-Color "[*] Output saved locally at: $TmpOutput" "Yellow"
+    Write-Output-Color "[*] MD5 Checksum: $Checksum" "Yellow"
     Write-Output-Color "[*] You can manually upload with curl:" "Yellow"
-    Write-Output-Color "    curl -X POST --data-binary @'$TmpOutput' -H 'X-Hostname: $Hostname' $ServerUrl/upload" "Yellow"
+    Write-Output-Color "    curl -X POST --data-binary @'$TmpOutput' -H 'X-Hostname: $Hostname' -H 'X-Client-Checksum: $Checksum' $ServerUrl/upload" "Yellow"
     exit 1
 }
