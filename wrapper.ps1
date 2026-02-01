@@ -75,7 +75,12 @@ Write-Output-Color "[*] Running winpeas (this may take 2-5 minutes)..." "Yellow"
 Write-Output-Color "[*] Output is being saved to file..." "Yellow"
 Write-Output-Safe ""
 
-# Run winpeas and capture output with real-time size tracking
+# Create synchronized hashtable for cross-runspace byte tracking
+$SyncHash = [hashtable]::Synchronized(@{
+    ByteCount = 0
+})
+
+# Run winpeas and capture output with accurate byte tracking
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -90,25 +95,49 @@ try {
     $Process.Start() | Out-Null
     Write-Output-Color "[*] Winpeas running (PID: $($Process.Id))..." "Yellow"
     
-    # Start async reading
+    # Start async reading with byte counting
     $OutputBuilder = New-Object System.Text.StringBuilder
     $ErrorBuilder = New-Object System.Text.StringBuilder
     
     $OutputEventHandler = {
         if ($EventArgs.Data -ne $null) {
-            [void]$Event.MessageData.AppendLine($EventArgs.Data)
+            $Line = $EventArgs.Data
+            [void]$Event.MessageData.StringBuilder.AppendLine($Line)
+            # Calculate and add byte count for this line (UTF-8 encoding)
+            $LineBytes = [Text.Encoding]::UTF8.GetByteCount($Line) + 1  # +1 for newline
+            $Event.MessageData.SyncHash.ByteCount += $LineBytes
         }
+    }
+    
+    $ErrorEventHandler = {
+        if ($EventArgs.Data -ne $null) {
+            $Line = $EventArgs.Data
+            [void]$Event.MessageData.StringBuilder.AppendLine($Line)
+            # Count error bytes too
+            $LineBytes = [Text.Encoding]::UTF8.GetByteCount($Line) + 1
+            $Event.MessageData.SyncHash.ByteCount += $LineBytes
+        }
+    }
+    
+    # Pass both StringBuilder and SyncHash to event handlers
+    $OutputData = @{
+        StringBuilder = $OutputBuilder
+        SyncHash = $SyncHash
+    }
+    $ErrorData = @{
+        StringBuilder = $ErrorBuilder
+        SyncHash = $SyncHash
     }
     
     $OutputEvent = Register-ObjectEvent -InputObject $Process `
         -EventName OutputDataReceived `
         -Action $OutputEventHandler `
-        -MessageData $OutputBuilder
+        -MessageData $OutputData
     
     $ErrorEvent = Register-ObjectEvent -InputObject $Process `
         -EventName ErrorDataReceived `
-        -Action $OutputEventHandler `
-        -MessageData $ErrorBuilder
+        -Action $ErrorEventHandler `
+        -MessageData $ErrorData
     
     $Process.BeginOutputReadLine()
     $Process.BeginErrorReadLine()
@@ -122,8 +151,8 @@ try {
         $Now = Get-Date
         $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # Get current StringBuilder size (accumulated output)
-        $CurrentSize = $OutputBuilder.Length
+        # Get current byte count from synchronized hashtable
+        $CurrentSize = $SyncHash.ByteCount
         $CurrentKB = [Math]::Round($CurrentSize / 1KB, 1)
         
         # Non-interactive mode: periodic text updates
@@ -147,7 +176,7 @@ try {
     $ExitCode = $Process.ExitCode
     
     # Get final size
-    $FinalSize = $OutputBuilder.Length
+    $FinalSize = $SyncHash.ByteCount
     $FinalKB = [Math]::Round($FinalSize / 1KB, 1)
     
     # Cleanup events
