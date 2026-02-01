@@ -75,7 +75,10 @@ Write-Output-Color "[*] Running winpeas (this may take 2-5 minutes)..." "Yellow"
 Write-Output-Color "[*] Output is being saved to file..." "Yellow"
 Write-Output-Safe ""
 
-# Run winpeas and capture output with progress tracking
+# Create empty temp file
+[System.IO.File]::WriteAllText($TmpOutput, "")
+
+# Run winpeas and capture output with real-time file size tracking
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -90,13 +93,20 @@ try {
     $Process.Start() | Out-Null
     Write-Output-Color "[*] Winpeas running (PID: $($Process.Id))..." "Yellow"
     
-    # Start async reading
+    # Start async reading and write to file in real-time
     $OutputBuilder = New-Object System.Text.StringBuilder
     $ErrorBuilder = New-Object System.Text.StringBuilder
     
     $OutputEventHandler = {
         if ($EventArgs.Data -ne $null) {
-            [void]$Event.MessageData.AppendLine($EventArgs.Data)
+            $Line = $EventArgs.Data
+            [void]$Event.MessageData.AppendLine($Line)
+            # Write to file in real-time
+            try {
+                [System.IO.File]::AppendAllText($using:TmpOutput, $Line + "`n")
+            } catch {
+                # Ignore write errors
+            }
         }
     }
     
@@ -116,27 +126,31 @@ try {
     # Show progress while winpeas is running
     $StartTime = Get-Date
     $LastUpdate = $StartTime
+    $LastSize = 0
     
     while (-not $Process.HasExited) {
         $Now = Get-Date
         $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # Time-based progress (reliable)
-        $EstimatedDuration = 120  # 2 minutes typical
-        $ProgressPercent = [Math]::Min(95, [int](($Elapsed / $EstimatedDuration) * 100))
+        # Get current file size
+        $CurrentSize = 0
+        if (Test-Path $TmpOutput) {
+            $CurrentSize = (Get-Item $TmpOutput).Length
+        }
+        $CurrentKB = [Math]::Round($CurrentSize / 1KB, 1)
         
         # Non-interactive mode: periodic text updates
         if (-not $IsInteractive) {
-            if (($Now - $LastUpdate).TotalSeconds -ge 10) {
-                Write-Output "[*] Still running... ($Elapsed seconds elapsed)"
+            if (($Now - $LastUpdate).TotalSeconds -ge 10 -or $CurrentSize -ne $LastSize) {
+                Write-Output "[*] Running... $Elapsed sec | Output: $CurrentKB KB"
                 $LastUpdate = $Now
+                $LastSize = $CurrentSize
             }
         } else {
-            # Interactive mode: fancy progress bar
+            # Interactive mode: fancy display
             $Minutes = [Math]::Floor($Elapsed / 60)
             $Seconds = $Elapsed % 60
-            $ProgressBar = "[" + ("=" * [int]($ProgressPercent / 5)) + (" " * (20 - [int]($ProgressPercent / 5))) + "]"
-            Write-Host "`r[*] Progress: $ProgressBar $ProgressPercent% | Elapsed: $Minutes`:$($Seconds.ToString('00'))" -NoNewline -ForegroundColor Cyan
+            Write-Host "`r[*] Running: $Minutes`:$($Seconds.ToString('00')) | Output: $CurrentKB KB" -NoNewline -ForegroundColor Cyan
         }
         
         Start-Sleep -Milliseconds 500
@@ -145,6 +159,13 @@ try {
     $Process.WaitForExit()
     $ExitCode = $Process.ExitCode
     
+    # Get final size
+    $FinalSize = 0
+    if (Test-Path $TmpOutput) {
+        $FinalSize = (Get-Item $TmpOutput).Length
+    }
+    $FinalKB = [Math]::Round($FinalSize / 1KB, 1)
+    
     # Cleanup events
     Unregister-Event -SourceIdentifier $OutputEvent.Name
     Unregister-Event -SourceIdentifier $ErrorEvent.Name
@@ -152,7 +173,7 @@ try {
     Remove-Job -Id $ErrorEvent.Id -Force
     
     if ($IsInteractive) {
-        Write-Host "`r[+] Progress: [====================] 100% | Complete!" -NoNewline -ForegroundColor Green
+        Write-Host "`r[+] Complete! | Output: $FinalKB KB" -NoNewline -ForegroundColor Green
     }
     Write-Output-Safe ""
     Write-Output-Safe ""
@@ -166,7 +187,7 @@ try {
         $FullOutput += "`n`n=== STDERR ===`n" + $ErrorOutput
     }
     
-    # Save to temp file
+    # Save to temp file (overwrite with complete output)
     [System.IO.File]::WriteAllText($TmpOutput, $FullOutput)
     
     Write-Output-Color "[+] Winpeas completed with exit code: $ExitCode" "Green"
