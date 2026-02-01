@@ -3,9 +3,8 @@
 # NOTE: Downloads scripts from Kali host (for isolated CTF environments)
 # Compatible with PowerShell 2.0+
 
-param(
-    [string]$ServerUrl = "KALI_SERVER_URL"  # Will be replaced by receiver.py
-)
+# Server URL will be replaced by receiver.py
+$ServerUrl = "KALI_SERVER_URL"
 
 $ErrorActionPreference = "Stop"
 
@@ -60,8 +59,8 @@ try {
     $Process = New-Object System.Diagnostics.Process
     $Process.StartInfo = $ProcessInfo
     
-    Write-Host "[*] Winpeas running (PID: $($Process.Id))..." -ForegroundColor Yellow
     $Process.Start() | Out-Null
+    Write-Host "[*] Winpeas running (PID: $($Process.Id))..." -ForegroundColor Yellow
     
     # Start async reading to prevent buffer deadlock
     $OutputBuilder = New-Object System.Text.StringBuilder
