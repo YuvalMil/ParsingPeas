@@ -75,10 +75,7 @@ Write-Output-Color "[*] Running winpeas (this may take 2-5 minutes)..." "Yellow"
 Write-Output-Color "[*] Output is being saved to file..." "Yellow"
 Write-Output-Safe ""
 
-# Create empty temp file
-[System.IO.File]::WriteAllText($TmpOutput, "")
-
-# Run winpeas and capture output with real-time file size tracking
+# Run winpeas and capture output with real-time size tracking
 try {
     $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
     $ProcessInfo.FileName = $ScriptPath
@@ -93,20 +90,13 @@ try {
     $Process.Start() | Out-Null
     Write-Output-Color "[*] Winpeas running (PID: $($Process.Id))..." "Yellow"
     
-    # Start async reading and write to file in real-time
+    # Start async reading
     $OutputBuilder = New-Object System.Text.StringBuilder
     $ErrorBuilder = New-Object System.Text.StringBuilder
     
     $OutputEventHandler = {
         if ($EventArgs.Data -ne $null) {
-            $Line = $EventArgs.Data
-            [void]$Event.MessageData.AppendLine($Line)
-            # Write to file in real-time
-            try {
-                [System.IO.File]::AppendAllText($using:TmpOutput, $Line + "`n")
-            } catch {
-                # Ignore write errors
-            }
+            [void]$Event.MessageData.AppendLine($EventArgs.Data)
         }
     }
     
@@ -132,11 +122,8 @@ try {
         $Now = Get-Date
         $Elapsed = [Math]::Round(($Now - $StartTime).TotalSeconds)
         
-        # Get current file size
-        $CurrentSize = 0
-        if (Test-Path $TmpOutput) {
-            $CurrentSize = (Get-Item $TmpOutput).Length
-        }
+        # Get current StringBuilder size (accumulated output)
+        $CurrentSize = $OutputBuilder.Length
         $CurrentKB = [Math]::Round($CurrentSize / 1KB, 1)
         
         # Non-interactive mode: periodic text updates
@@ -147,7 +134,7 @@ try {
                 $LastSize = $CurrentSize
             }
         } else {
-            # Interactive mode: fancy display
+            # Interactive mode: live display
             $Minutes = [Math]::Floor($Elapsed / 60)
             $Seconds = $Elapsed % 60
             Write-Host "`r[*] Running: $Minutes`:$($Seconds.ToString('00')) | Output: $CurrentKB KB" -NoNewline -ForegroundColor Cyan
@@ -160,10 +147,7 @@ try {
     $ExitCode = $Process.ExitCode
     
     # Get final size
-    $FinalSize = 0
-    if (Test-Path $TmpOutput) {
-        $FinalSize = (Get-Item $TmpOutput).Length
-    }
+    $FinalSize = $OutputBuilder.Length
     $FinalKB = [Math]::Round($FinalSize / 1KB, 1)
     
     # Cleanup events
@@ -187,7 +171,7 @@ try {
         $FullOutput += "`n`n=== STDERR ===`n" + $ErrorOutput
     }
     
-    # Save to temp file (overwrite with complete output)
+    # Save to temp file
     [System.IO.File]::WriteAllText($TmpOutput, $FullOutput)
     
     Write-Output-Color "[+] Winpeas completed with exit code: $ExitCode" "Green"
