@@ -117,7 +117,7 @@ python3 parser.py /path/to/peas_output.txt
 Edit `receiver.py` to change:
 - Port (default: 8000)
 - Output directories
-- Max upload size (default: 500MB)
+- Max upload size (default: 10MB)
 
 ---
 
