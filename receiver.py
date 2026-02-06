@@ -19,7 +19,7 @@ app = Flask(__name__)
 OUTPUT_DIR = "./received_outputs"
 REPORTS_DIR = "./reports"
 SCRIPTS_DIR = "./scripts"
-MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Create directories
 os.makedirs(OUTPUT_DIR, exist_ok=True)
