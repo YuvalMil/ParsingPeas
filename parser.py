@@ -755,15 +755,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <title>ParsingPeas: {hostname}</title>
     <style>
         :root {{
-            --bg: #0f0f12;
-            --text: #e0e0e0;
-            --accent: #00ff00;
-            --panel: #1a1a1f;
-            --border: #333;
-            --critical-bg: #ff0000;
-            --critical-fg: #ffff00;
-            --critical-glow: rgba(255, 0, 0, 0.4);
-            --high-fg: #ff4444;
+            --bg: #1b1d23;
+            --text: #c6ccd6;
+            --accent: #6fcf97;
+            --panel: #22252e;
+            --surface: #1f2229;
+            --surface2: #2a2e38;
+            --border: #333a45;
+            --critical-bg: #c0444f;
+            --critical-fg: #ffd9a0;
+            --critical-glow: rgba(224, 85, 97, 0.30);
+            --high-fg: #e0a36b;
         }}
         body {{ background: var(--bg); color: var(--text); font-family: 'Segoe UI', 'Consolas', monospace; margin: 0; display: flex; height: 100vh; overflow: hidden; }}
         aside {{ width: 340px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; user-select: none; }}
@@ -771,7 +773,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         nav {{ flex: 1; overflow-y: auto; padding: 10px; }}
         nav ul {{ list-style: none; padding: 0; margin: 0; }}
         .nav-controls {{ padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }}
-        .nav-btn {{ flex: 1; background: #25252b; color: #aaa; border: 1px solid #444; border-radius: 4px; padding: 4px; cursor: pointer; font-size: 0.8em; }}
+        .nav-btn {{ flex: 1; background: var(--surface2); color: #aaa; border: 1px solid #444; border-radius: 4px; padding: 4px; cursor: pointer; font-size: 0.8em; }}
         .nav-btn:hover {{ color: #fff; border-color: #666; }}
         .nav-toggle {{ flex: 1 1 45%; display: flex; align-items: center; gap: 6px; color: #aaa; font-size: 0.78em; cursor: pointer; }}
         .nav-toggle input {{ accent-color: var(--accent); cursor: pointer; }}
@@ -800,7 +802,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .tabs button {{ background: transparent; border: none; color: #888; padding: 8px 16px; cursor: pointer; font-size: 1em; border-radius: 4px; transition: 0.2s; font-weight: bold; }}
         .tabs button.active {{ color: var(--bg); background: var(--accent); }}
         .meta-info {{ font-size: 0.85em; color: #666; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }}
-        .hdr-badge {{ background: #25252b; border: 1px solid #444; color: #bbb; padding: 3px 9px; border-radius: 12px; font-size: 0.95em; white-space: nowrap; }}
+        .hdr-badge {{ background: var(--surface2); border: 1px solid #444; color: #bbb; padding: 3px 9px; border-radius: 12px; font-size: 0.95em; white-space: nowrap; }}
         .hdr-badge.user {{ color: var(--accent); border-color: #2c5; }}
         .hdr-badge.user.root {{ color: var(--critical-fg); background: var(--critical-bg); border-color: var(--critical-bg); font-weight: bold; }}
         .view {{ display: none; flex: 1; overflow-y: auto; padding: 0; scroll-behavior: smooth; }}
@@ -808,7 +810,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .report-body {{ padding: 20px 30px 40px; }}
 
         /* Findings bar */
-        #findings-bar {{ display: flex; align-items: center; gap: 15px; flex-wrap: wrap; padding: 12px 30px; background: #15151a; border-bottom: 1px solid var(--border); }}
+        #findings-bar {{ display: flex; align-items: center; gap: 15px; flex-wrap: wrap; padding: 12px 30px; background: var(--surface); border-bottom: 1px solid var(--border); }}
         #findings-bar .fb-label {{ color: #888; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; }}
         .fb-chip {{ border: none; border-radius: 14px; padding: 5px 12px; font-weight: bold; font-size: 0.85em; cursor: pointer; }}
         .fb-chip.crit {{ background: var(--critical-bg); color: var(--critical-fg); }}
@@ -825,7 +827,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .section-category {{ font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; color: #666; border: 1px solid #333; padding: 4px 8px; border-radius: 4px; }}
         .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.3em; }}
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
-        pre.content {{ white-space: pre-wrap; overflow-wrap: anywhere; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
+        pre.content {{ white-space: pre-wrap; overflow-wrap: anywhere; font-family: 'Consolas', monospace; font-size: 0.9em; background: var(--surface); padding: 20px; border-radius: 6px; border: 1px solid var(--border); color: var(--text); line-height: 1.15; }}
         #report-view.nowrap pre.content {{ white-space: pre; overflow-wrap: normal; overflow-x: auto; }}
 
         /* Findings-only filter */
@@ -836,11 +838,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         /* Combo-critical (RED/YELLOW etc) – keep original colors but make it pop. */
         .crit-combo {{ font-weight: bold !important; }}
 
-        #terminal-view {{ background: #000; padding: 20px; }}
-        #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: #ccc; line-height: 1.15; white-space: pre; overflow-x: auto; }}
+        #terminal-view {{ background: #14161b; padding: 20px; }}
+        #term-content {{ font-family: 'Consolas', monospace; font-size: 13px; color: var(--text); line-height: 1.15; white-space: pre; overflow-x: auto; }}
         #loading {{ position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: #000; padding: 10px 20px; border-radius: 20px; font-weight: bold; display: none; }}
         ::-webkit-scrollbar {{ width: 8px; }}
-        ::-webkit-scrollbar-track {{ background: #0f0f12; }}
+        ::-webkit-scrollbar-track {{ background: #16181d; }}
         ::-webkit-scrollbar-thumb {{ background: #333; border-radius: 4px; }}
     </style>
 </head>
