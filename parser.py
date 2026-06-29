@@ -259,6 +259,8 @@ class PeasParser:
         self.findings = []
         self.section_findings = {}
         self.hostname = "unknown"
+        self.current_user = ""
+        self.os_info = ""
         self.section_ids = {}
         self.seen_findings = set()
         # Stats for reporting
@@ -271,6 +273,7 @@ class PeasParser:
     def parse(self):
         self._strip_initial_banner()
         self._extract_hostname()
+        self._extract_meta()
         self._extract_sections()
         self._organize_categories()
         self._extract_findings_contextual()
@@ -368,6 +371,19 @@ class PeasParser:
                 if line.lower().startswith("hostname:"):
                     self.hostname = line.split(":", 1)[1].strip()
                     break
+
+    def _extract_meta(self):
+        """Pull a couple of at-a-glance facts (current user, OS) for the report
+        header badges. Best-effort; absent matches just leave the badge off."""
+        m = re.search(r'uid=\d+\(([^)]+)\)', self.clean_content)
+        if m:
+            self.current_user = m.group(1).strip()
+
+        m = re.search(r'^OS:\s*(.+)$', self.clean_content, re.MULTILINE)
+        if not m:
+            m = re.search(r'^\s*Description:\s*(.+)$', self.clean_content, re.MULTILINE)
+        if m:
+            self.os_info = m.group(1).strip()[:70]
 
     def _extract_sections(self):
         """Split the output into sections following linpeas' major/sub hierarchy.
@@ -594,6 +610,17 @@ class ReportGenerator:
         with open(self.output_dir / filename, 'w', encoding='utf-8') as f:
             json.dump(data, f)
 
+    def _section_level(self, title):
+        """'critical', 'high' or '' for a section, based on its findings."""
+        findings = self.parser.section_findings.get(title)
+        if not findings:
+            return ''
+        if any(f['level'] == 'critical' for f in findings):
+            return 'critical'
+        if any(f['level'] == 'high' for f in findings):
+            return 'high'
+        return ''
+
     def _build_html(self, json_file):
         toc_html = []
         content_html = []
@@ -603,23 +630,17 @@ class ReportGenerator:
             if not sections:
                 continue
 
-            # Calculate stats for this category - count SECTIONS not individual findings
+            # Per-category finding counts (sections, not lines).
             sections_with_crit = 0
             sections_with_high = 0
             for title in sections.keys():
-                # Skip "General Information" from report summary
                 if title == "General Information":
                     continue
-                    
-                if title in self.parser.section_findings:
-                    findings = self.parser.section_findings[title]
-                    has_critical = any(f['level'] == 'critical' for f in findings)
-                    has_high = any(f['level'] == 'high' for f in findings)
-
-                    if has_critical:
-                        sections_with_crit += 1
-                    elif has_high:
-                        sections_with_high += 1
+                lvl = self._section_level(title)
+                if lvl == 'critical':
+                    sections_with_crit += 1
+                elif lvl == 'high':
+                    sections_with_high += 1
 
             stats_badge = ""
             if sections_with_crit > 0 or sections_with_high > 0:
@@ -637,8 +658,9 @@ class ReportGenerator:
             if not visible_sections:
                 continue
 
+            cat_finding_cls = ' cat-has-finding' if (sections_with_crit or sections_with_high) else ''
             toc_html.append(f'''
-            <li class="category-group">
+            <li class="category-group{cat_finding_cls}">
                 <details open>
                     <summary>
                         <span>{html.escape(category_name)} <span class="count">{len(visible_sections)}</span></span>
@@ -648,32 +670,33 @@ class ReportGenerator:
             ''')
 
             for title, content in sections.items():
-                # Skip "General Information" from report summary (still in terminal view)
                 if title == "General Information":
                     continue
-                    
                 if not content.strip():
                     continue
                 safe_title = html.escape(title)
                 sec_id = self.parser.section_ids[title]
+                lvl = self._section_level(title)
 
                 indicator = ''
-                if title in self.parser.section_findings:
-                    findings = self.parser.section_findings[title]
-                    has_critical = any(f['level'] == 'critical' for f in findings)
-                    if has_critical:
-                        indicator = f'<span class="toc-finding-dot critical" onclick="toggleRead(this, event)" title="Click to mark read"></span>'
-                    else:
-                        indicator = f'<span class="toc-finding-dot high" onclick="toggleRead(this, event)" title="Click to mark read"></span>'
+                a_cls = 'toc-link'
+                if lvl:
+                    a_cls += ' has-finding'
+                    indicator = (f'<span class="toc-finding-dot {lvl}" data-sid="{sec_id}" '
+                                 f'onclick="toggleRead(this, event)" title="Click to mark read"></span>')
 
-                toc_html.append(f'<li><a href="#{sec_id}"><span class="toc-title">{safe_title}</span>{indicator}</a></li>')
+                toc_html.append(f'<li><a class="{a_cls}" href="#{sec_id}">'
+                                f'<span class="toc-title">{safe_title}</span>{indicator}</a></li>')
 
                 colored_content = converter.to_html(content)
+                sec_cls = 'report-section'
+                if lvl:
+                    sec_cls += f' has-finding has-{lvl}'
 
                 content_html.append(f'''
-                    <section id="{sec_id}" class="report-section">
+                    <section id="{sec_id}" class="{sec_cls}">
                         <div class="section-header">
-                            <span class="section-category">{category_name}</span>
+                            <span class="section-category">{html.escape(category_name)}</span>
                             <h3>{safe_title}</h3>
                             <a href="#" class="top-link">↑ Top</a>
                         </div>
@@ -683,12 +706,38 @@ class ReportGenerator:
 
             toc_html.append('</ul></details></li>')
 
+        ncrit = self.parser.stats['sections_with_critical']
+        nhigh = self.parser.stats['sections_with_high']
+        if ncrit or nhigh:
+            findings_summary = (
+                f'<button class="fb-chip crit" onclick="jumpFinding(\'critical\')">'
+                f'{ncrit} critical</button>'
+                f'<button class="fb-chip high" onclick="jumpFinding(\'high\')">'
+                f'{nhigh} high</button>')
+        else:
+            findings_summary = '<span class="fb-none">No red / critical findings flagged</span>'
+
+        user = self.parser.current_user
+        user_badge = ''
+        if user:
+            ucls = 'hdr-badge user' + (' root' if user == 'root' else '')
+            user_badge = f'<span class="{ucls}" title="Current user">&#128100; {html.escape(user)}</span>'
+        os_badge = ''
+        if self.parser.os_info:
+            os_badge = f'<span class="hdr-badge" title="OS">&#128187; {html.escape(self.parser.os_info)}</span>'
+
+        report_id = f"{self.parser.hostname}_{self.timestamp}"
+
         return HTML_TEMPLATE.format(
-            hostname=self.parser.hostname,
+            hostname=html.escape(self.parser.hostname),
             timestamp=self.timestamp,
             toc='\n'.join(toc_html),
             content='\n'.join(content_html),
-            json_file=json_file
+            json_file=json_file,
+            findings_summary=findings_summary,
+            user_badge=user_badge,
+            os_badge=os_badge,
+            report_id=html.escape(report_id),
         )
 
 
@@ -714,9 +763,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .brand {{ padding: 20px; font-size: 1.4em; color: var(--accent); font-weight: bold; border-bottom: 1px solid var(--border); letter-spacing: 1px; }}
         nav {{ flex: 1; overflow-y: auto; padding: 10px; }}
         nav ul {{ list-style: none; padding: 0; margin: 0; }}
-        .nav-controls {{ padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid var(--border); }}
+        .nav-controls {{ padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }}
         .nav-btn {{ flex: 1; background: #25252b; color: #aaa; border: 1px solid #444; border-radius: 4px; padding: 4px; cursor: pointer; font-size: 0.8em; }}
         .nav-btn:hover {{ color: #fff; border-color: #666; }}
+        .nav-toggle {{ flex: 1 1 45%; display: flex; align-items: center; gap: 6px; color: #aaa; font-size: 0.78em; cursor: pointer; }}
+        .nav-toggle input {{ accent-color: var(--accent); cursor: pointer; }}
         details {{ margin-bottom: 5px; }}
         summary {{ cursor: pointer; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 4px; font-weight: bold; font-size: 0.9em; list-style: none; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }}
         summary:hover {{ background: rgba(255,255,255,0.08); color: #fff; }}
@@ -724,6 +775,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         details[open] summary {{ color: var(--accent); }}
         details li a {{ display: flex; align-items: center; padding: 8px 15px 8px 25px; color: #888; text-decoration: none; font-size: 0.85em; transition: 0.2s; border-left: 2px solid transparent; }}
         details li a:hover {{ color: white; background: rgba(255,255,255,0.05); }}
+        details li a.active {{ color: #fff; background: rgba(0,255,0,0.08); border-left-color: var(--accent); }}
         .toc-title {{ flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }}
         .toc-finding-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: auto; cursor: pointer; transition: opacity 0.2s; flex: 0 0 auto; }}
         .toc-finding-dot:hover {{ transform: scale(1.2); }}
@@ -737,29 +789,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .count {{ font-size: 0.8em; opacity: 0.5; font-weight: normal; background: #333; padding: 2px 6px; border-radius: 10px; margin-left: 5px; }}
         main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; }}
-        header {{ padding: 15px 30px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }}
+        header {{ padding: 15px 30px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 15px; }}
         .tabs button {{ background: transparent; border: none; color: #888; padding: 8px 16px; cursor: pointer; font-size: 1em; border-radius: 4px; transition: 0.2s; font-weight: bold; }}
         .tabs button.active {{ color: var(--bg); background: var(--accent); }}
-        .meta-info {{ font-size: 0.85em; color: #666; }}
-        .view {{ display: none; flex: 1; overflow-y: auto; padding: 30px; scroll-behavior: smooth; }}
+        .meta-info {{ font-size: 0.85em; color: #666; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }}
+        .hdr-badge {{ background: #25252b; border: 1px solid #444; color: #bbb; padding: 3px 9px; border-radius: 12px; font-size: 0.95em; white-space: nowrap; }}
+        .hdr-badge.user {{ color: var(--accent); border-color: #2c5; }}
+        .hdr-badge.user.root {{ color: var(--critical-fg); background: var(--critical-bg); border-color: var(--critical-bg); font-weight: bold; }}
+        .view {{ display: none; flex: 1; overflow-y: auto; padding: 0; scroll-behavior: smooth; }}
         .view.active {{ display: block; }}
-        #findings-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; margin-bottom: 40px; }}
-        .finding-card {{ background: #25252b; border: 1px solid #444; border-radius: 8px; padding: 20px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 10px; }}
-        .finding-card:hover {{ transform: translateY(-3px); border-color: #777; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }}
-        .finding-card.critical {{ border-top: 4px solid var(--critical-bg); box-shadow: 0 0 10px var(--critical-glow) inset; }}
-        .finding-card.high {{ border-top: 4px solid var(--high-fg); }}
-        .finding-header {{ font-weight: bold; font-size: 1.1em; color: #fff; margin-bottom: 5px; }}
-        .finding-stats {{ display: flex; gap: 10px; }}
-        .badge {{ padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8em; color: #000; }}
-        .badge.critical {{ background: var(--critical-bg); color: var(--critical-fg); text-shadow: 1px 1px 0 #000; }}
-        .badge.high {{ background: var(--high-fg); color: #000; }}
-        .finding-footer {{ font-size: 0.8em; color: #666; margin-top: auto; text-align: right; }}
-        .report-section {{ margin-bottom: 50px; scroll-margin-top: 20px; }}
-        .section-header {{ display: flex; align-items: center; gap: 15px; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }}
+        .report-body {{ padding: 20px 30px 40px; }}
+
+        /* Findings bar */
+        #findings-bar {{ display: flex; align-items: center; gap: 15px; flex-wrap: wrap; padding: 12px 30px; background: #15151a; border-bottom: 1px solid var(--border); }}
+        #findings-bar .fb-label {{ color: #888; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; }}
+        .fb-chip {{ border: none; border-radius: 14px; padding: 5px 12px; font-weight: bold; font-size: 0.85em; cursor: pointer; }}
+        .fb-chip.crit {{ background: var(--critical-bg); color: var(--critical-fg); }}
+        .fb-chip.high {{ background: var(--high-fg); color: #000; }}
+        .fb-chip:hover {{ filter: brightness(1.15); }}
+        .fb-none {{ color: #6a6; font-size: 0.9em; }}
+        .legend {{ margin-left: auto; display: flex; gap: 14px; color: #888; font-size: 0.8em; align-items: center; }}
+        .lg-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; }}
+        .lg-dot.crit {{ background: var(--critical-bg); border: 2px solid var(--critical-fg); }}
+        .lg-dot.high {{ background: var(--high-fg); }}
+
+        .report-section {{ margin-bottom: 50px; scroll-margin-top: 60px; }}
+        .section-header {{ display: flex; align-items: center; gap: 15px; margin-bottom: 15px; border-bottom: 1px solid #333; padding: 10px 0; position: sticky; top: 0; background: var(--bg); z-index: 5; }}
         .section-category {{ font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; color: #666; border: 1px solid #333; padding: 4px 8px; border-radius: 4px; }}
         .section-header h3 {{ color: var(--accent); margin: 0; font-size: 1.3em; }}
         .top-link {{ margin-left: auto; color: #666; text-decoration: none; font-size: 0.8em; }}
-        pre.content {{ white-space: pre; overflow-x: auto; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
+        pre.content {{ white-space: pre-wrap; overflow-wrap: anywhere; font-family: 'Consolas', monospace; font-size: 0.9em; background: #15151a; padding: 20px; border-radius: 6px; border: 1px solid #2a2a2a; color: #ccc; line-height: 1.15; }}
+        #report-view.nowrap pre.content {{ white-space: pre; overflow-wrap: normal; overflow-x: auto; }}
+
+        /* Findings-only filter */
+        body.findings-only .report-section:not(.has-finding) {{ display: none; }}
+        body.findings-only .toc-link:not(.has-finding) {{ display: none; }}
+        body.findings-only li.category-group:not(.cat-has-finding) {{ display: none; }}
 
         /* Combo-critical (RED/YELLOW etc) – keep original colors but make it pop. */
         .crit-combo {{ font-weight: bold !important; }}
@@ -778,6 +843,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class=\"nav-controls\">
             <button class=\"nav-btn\" onclick=\"expandAll(true)\">+ Open All</button>
             <button class=\"nav-btn\" onclick=\"expandAll(false)\">- Close All</button>
+            <label class=\"nav-toggle\"><input type=\"checkbox\" id=\"findings-only\" onchange=\"toggleFindingsOnly(this)\"> Findings only</label>
+            <label class=\"nav-toggle\"><input type=\"checkbox\" id=\"wrap-toggle\" checked onchange=\"toggleWrap(this)\"> Wrap lines</label>
         </div>
         <nav>
             <ul>
@@ -791,10 +858,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <button class=\"active\" onclick=\"switchView('report')\">Report Summary</button>
                 <button onclick=\"switchView('terminal')\">Full Terminal Output</button>
             </div>
-            <div class=\"meta-info\">Host: <strong>{hostname}</strong> | {timestamp}</div>
+            <div class=\"meta-info\">
+                {user_badge}{os_badge}
+                <span class=\"hdr-badge\">{hostname}</span>
+                <span>{timestamp}</span>
+            </div>
         </header>
         <div id=\"report-view\" class=\"view active\">
-            {content}
+            <div id=\"findings-bar\">
+                <span class=\"fb-label\">Findings</span>
+                {findings_summary}
+                <span class=\"legend\">
+                    <span><span class=\"lg-dot crit\"></span>critical</span>
+                    <span><span class=\"lg-dot high\"></span>high</span>
+                </span>
+            </div>
+            <div class=\"report-body\">
+                {content}
+            </div>
         </div>
         <div id=\"terminal-view\" class=\"view\">
             <pre id=\"term-content\"></pre>
@@ -803,10 +884,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </main>
     <script>
         const TERMINAL_FILE = '{json_file}';
+        const REPORT_ID = '{report_id}';
+        const READ_KEY = 'pp_read_' + REPORT_ID;
         let terminalLoaded = false;
-        let chunks = [];
-        let nextChunkIdx = 0;
+
         function expandAll(open) {{ document.querySelectorAll('details').forEach(el => el.open = open); }}
+
         function switchView(viewName) {{
             document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tabs button').forEach(el => el.classList.remove('active'));
@@ -815,6 +898,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (viewName === 'report') btns[0].classList.add('active'); else btns[1].classList.add('active');
             if (viewName === 'terminal' && !terminalLoaded) {{ loadTerminal(); }}
         }}
+
+        // --- Terminal view: render the whole output at once so Ctrl-F works ---
         async function loadTerminal() {{
             const loader = document.getElementById('loading');
             loader.style.display = 'block';
@@ -822,29 +907,78 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const res = await fetch(TERMINAL_FILE);
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 const data = await res.json();
-                chunks = data.chunks;
+                document.getElementById('term-content').innerHTML = data.chunks.join("\\n");
                 terminalLoaded = true;
-                renderNextChunk();
             }} catch (e) {{
                 document.getElementById('term-content').innerText = "Load failed: " + e;
             }} finally {{
                 loader.style.display = 'none';
             }}
         }}
-        function renderNextChunk() {{
-            if (nextChunkIdx >= chunks.length) return;
-            document.getElementById('term-content').innerHTML += chunks[nextChunkIdx] + "\\n";
-            nextChunkIdx++;
+
+        // --- Wrap toggle ---
+        function toggleWrap(el) {{
+            document.getElementById('report-view').classList.toggle('nowrap', !el.checked);
         }}
-        document.getElementById('terminal-view').addEventListener('scroll', (e) => {{
-            if (e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight < 400) {{ renderNextChunk(); }}
-        }});
-        // --- Toggle Read Status ---
+
+        // --- Findings-only filter ---
+        function toggleFindingsOnly(el) {{
+            document.body.classList.toggle('findings-only', el.checked);
+        }}
+
+        // --- Jump between findings of a given level ---
+        const jumpState = {{ critical: -1, high: -1 }};
+        function jumpFinding(level) {{
+            const list = Array.from(document.querySelectorAll('.report-section.has-' + level));
+            if (!list.length) return;
+            jumpState[level] = (jumpState[level] + 1) % list.length;
+            list[jumpState[level]].scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+        }}
+
+        // --- Persisted "mark as read" dots (localStorage per report) ---
+        function loadRead() {{
+            try {{ return new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]')); }}
+            catch (e) {{ return new Set(); }}
+        }}
+        function saveRead(set) {{
+            try {{ localStorage.setItem(READ_KEY, JSON.stringify(Array.from(set))); }} catch (e) {{}}
+        }}
         function toggleRead(el, event) {{
             event.preventDefault();
             event.stopPropagation();
             el.classList.toggle('read');
+            const set = loadRead();
+            const sid = el.dataset.sid;
+            if (el.classList.contains('read')) set.add(sid); else set.delete(sid);
+            saveRead(set);
         }}
+
+        // --- Scrollspy: highlight the current section in the TOC ---
+        function initScrollSpy() {{
+            const links = {{}};
+            document.querySelectorAll('nav a[href^="#"]').forEach(a => {{
+                links[a.getAttribute('href').slice(1)] = a;
+            }});
+            const obs = new IntersectionObserver((entries) => {{
+                entries.forEach(e => {{
+                    if (e.isIntersecting) {{
+                        document.querySelectorAll('nav a.active').forEach(a => a.classList.remove('active'));
+                        const l = links[e.target.id];
+                        if (l) {{ l.classList.add('active'); l.scrollIntoView({{ block: 'nearest' }}); }}
+                    }}
+                }});
+            }}, {{ root: document.getElementById('report-view'), rootMargin: '0px 0px -75% 0px', threshold: 0 }});
+            document.querySelectorAll('.report-section').forEach(s => obs.observe(s));
+        }}
+
+        // --- Init ---
+        document.addEventListener('DOMContentLoaded', () => {{
+            const set = loadRead();
+            document.querySelectorAll('.toc-finding-dot').forEach(d => {{
+                if (set.has(d.dataset.sid)) d.classList.add('read');
+            }});
+            initScrollSpy();
+        }});
     </script>
 </body>
 </html>
