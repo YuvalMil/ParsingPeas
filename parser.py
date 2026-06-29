@@ -502,6 +502,13 @@ class PeasParser:
         self.seen_findings = set()
 
         for title, content in self.sections.items():
+            # The pre-banner "General Information" block holds the PEASS banner
+            # and colour legend (which prints the literal "RED/YELLOW" in a
+            # red/yellow combo). It is never shown in the report, so extracting
+            # findings from it only produces false positives.
+            if title == "General Information":
+                continue
+
             lines = content.splitlines()
             sec_id = self.section_ids.get(title, "")
             current_section_findings = []
