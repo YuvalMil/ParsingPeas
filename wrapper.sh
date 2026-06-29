@@ -105,21 +105,37 @@ RETRY_COUNT=0
 
 while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
     echo "[*] Upload attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
-    
-    # Use curl with progress bar
-    HTTP_CODE=$(curl -X POST \
-        -H "X-Session-ID: $SESSION_ID" \
-        -H "X-Hostname: $HOSTNAME" \
-        -H "X-Scan-Type: $SCAN_TYPE" \
-        -H "Content-Type: text/plain" \
-        --data-binary "@$TMP_OUTPUT" \
-        --connect-timeout 10 \
-        --max-time 120 \
-        -o /tmp/.upload_response.json \
-        -w "%{http_code}" \
-        --progress-bar \
-        "$SERVER_URL/upload")
-    
+
+    if [[ $USE_WGET ]]; then
+        # wget fallback (used when curl is unavailable)
+        if wget -q -O /tmp/.upload_response.json \
+            --header="X-Session-ID: $SESSION_ID" \
+            --header="X-Hostname: $HOSTNAME" \
+            --header="X-Scan-Type: $SCAN_TYPE" \
+            --header="Content-Type: text/plain" \
+            --post-file="$TMP_OUTPUT" \
+            --timeout=120 \
+            "$SERVER_URL/upload"; then
+            HTTP_CODE="200"
+        else
+            HTTP_CODE="000"
+        fi
+    else
+        # Use curl with progress bar
+        HTTP_CODE=$(curl -X POST \
+            -H "X-Session-ID: $SESSION_ID" \
+            -H "X-Hostname: $HOSTNAME" \
+            -H "X-Scan-Type: $SCAN_TYPE" \
+            -H "Content-Type: text/plain" \
+            --data-binary "@$TMP_OUTPUT" \
+            --connect-timeout 10 \
+            --max-time 120 \
+            -o /tmp/.upload_response.json \
+            -w "%{http_code}" \
+            --progress-bar \
+            "$SERVER_URL/upload")
+    fi
+
     echo ""
     
     if [[ "$HTTP_CODE" == "200" ]]; then

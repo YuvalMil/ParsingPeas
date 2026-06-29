@@ -235,15 +235,26 @@ class PeasParser:
     """Parses Linpeas/Winpeas output."""
 
     ANSI_SGR_RE = re.compile(r'\x1b\[([\d;]*)m')
-    
-    # Section header color pattern: cyan (1;36m) followed by green (1;32m)
-    HEADER_COLOR_PATTERN = re.compile(r'\x1b\[1;36m.*?\x1b\[1;32m')
+
+    # linpeas renders a two-level hierarchy with blue (1;34m) box art and green
+    # (1;32m) titles. We must distinguish the genuine headers from the check
+    # lines and hacktricks links that share the same colours, otherwise the
+    # report fragments into hundreds of junk sections.
+    #
+    #   Major:  ...═══╣ <green>TITLE<blue> ╠═══...      (boxed, opens AND closes)
+    #   Sub:    <blue>╔════╣ <green>TITLE                (opens with ╔, no close)
+    #   Check:  <blue>═╣ <green>Question? ....           (NO leading ╔  -> content)
+    #   Link:   <blue>╚ <italic>https://...              (leading ╚     -> content)
+    MAJOR_HEADER_RE = re.compile(r'╣\s*\x1b\[1;32m\s*(.+?)\s*\x1b\[1;3[46]m\s*╠')
+    SUB_HEADER_RE = re.compile(r'^(?:\x1b\[0m)?\x1b\[1;34m╔[═]+╣\s*\x1b\[1;32m\s*(.+?)\s*$')
 
     def __init__(self, content):
         self.raw_content = content
         self.converter = AnsiConverter()
         self.clean_content = self.converter.strip(content)
         self.sections = OrderedDict()
+        self.section_major = {}   # section title -> owning linpeas major section
+        self.major_order = []     # major section titles, in document order
         self.categorized_sections = OrderedDict()
         self.findings = []
         self.section_findings = {}
@@ -303,32 +314,50 @@ class PeasParser:
                     self.clean_content = self.converter.strip(self.raw_content)
                 return
 
+    def _classify_header(self, line):
+        """Classify a line as a linpeas section header.
+
+        Returns ('major', title) or ('sub', title) for genuine headers, and
+        (None, None) for everything else. Crucially, individual check lines
+        (``═╣ Question? ....``), hacktricks links (``╚ https://...``) and bare
+        box borders are *not* headers - they are content of their parent
+        section.
+        """
+        m = self.MAJOR_HEADER_RE.search(line)
+        if m:
+            title = self.converter.strip(m.group(1)).strip()
+            if title:
+                return 'major', title
+
+        s = self.SUB_HEADER_RE.match(line)
+        if s:
+            title = self.converter.strip(s.group(1)).strip()
+            if title:
+                return 'sub', title
+
+        # Plaintext fallback (output captured with no ANSI colours): only a
+        # box-art line that *opens* a section (╔ ... ╣) counts as a header.
+        if '\x1b[' not in line:
+            stripped = line.strip()
+            if stripped.startswith('╔') and '╣' in stripped:
+                title = stripped.lstrip('╔═╣ ').strip()
+                if title and len(title) < 100:
+                    return 'sub', title
+
+        return None, None
+
     def _is_section_header(self, line):
-        """
-        Detect if a line is a section header by ANSI color pattern.
-        Headers use: cyan (1;36m) for decoration + green (1;32m) for title.
-        This works regardless of character encoding corruption.
-        """
-        # Primary detection: cyan + green color pattern
-        if self.HEADER_COLOR_PATTERN.search(line):
-            return True
-        
-        # Fallback: standard Unicode box-drawing characters
-        box_chars = '╔═╗╚╝║─│┌┐└┘├┤┬┴┼'
-        if any(c in line for c in box_chars):
-            clean = self.converter.strip(line).strip()
-            # Headers usually have reasonable length
-            if len(clean) < 100 and clean:
-                return True
-        
-        # Fallback: [+] or [-] patterns that look like headers
-        clean_line = self.converter.strip(line).strip()
-        if clean_line.startswith('[+]') or clean_line.startswith('[-]'):
-            # Headers are usually short and don't end with colons
-            if len(clean_line) < 80 and not clean_line.endswith(':'):
-                return True
-        
-        return False
+        """True if the line opens a (major or sub) linpeas section."""
+        tier, _ = self._classify_header(line)
+        return tier is not None
+
+    def _is_decoration(self, line):
+        """True for pure box-border lines (e.g. the ╔═══╗ / ╚═══╝ that frame a
+        major header) that carry no information and only add visual noise to a
+        section body."""
+        clean = self.converter.strip(line)
+        clean = clean.translate(str.maketrans('', '', '╔═╗╚╝║╣╠┌┐└┘├┤┬┴┼─│ \t'))
+        return clean == ''
 
     def _extract_hostname(self):
         match = re.search(r'Hostname:\s*([\w\-\.]+)', self.clean_content, re.IGNORECASE)
@@ -341,59 +370,87 @@ class PeasParser:
                     break
 
     def _extract_sections(self):
+        """Split the output into sections following linpeas' major/sub hierarchy.
+
+        Header lines themselves are not copied into the section body (the
+        section's ``<h3>`` already shows the title); only the lines *between*
+        headers become content. A major header with no direct content yields an
+        empty section, which the report builder simply skips.
+        """
         lines = self.raw_content.splitlines()
-        current_header = "General Information"
+        current_major = "General Information"
+        current_title = "General Information"
         buffer = []
 
+        def flush():
+            if not buffer:
+                return
+            text = "\n".join(buffer)
+            if current_title in self.sections:
+                self.sections[current_title] += "\n" + text
+            else:
+                self.sections[current_title] = text
+                self.section_major[current_title] = current_major
+
         for line in lines:
-            if self._is_section_header(line):
-                # Save previous section
-                if buffer:
-                    if current_header in self.sections:
-                        self.sections[current_header] += "\n" + "\n".join(buffer)
-                    else:
-                        self.sections[current_header] = "\n".join(buffer)
-                    buffer = []
-
-                # Extract title from the green text portion (after \x1b[1;32m)
-                clean_line = self.converter.strip(line).strip()
-                
-                # Remove decorative characters (both standard and corrupted)
-                # Standard: ╔═╗╚╝║ etc
-                # Corrupted: อออน etc (Thai chars)
-                # Also remove common symbols: []+-
-                decorative_chars = '╔═╗╚╝║─│┌┐└┘├┤┬┴┼[]+-'
-                title = clean_line.translate(str.maketrans('', '', decorative_chars)).strip()
-                
-                # Additional cleanup: remove any remaining Thai/corrupted chars
-                # (they appear as non-ASCII in certain ranges)
-                title = ''.join(c for c in title if ord(c) < 0x0E00 or ord(c) > 0x0E7F)
-                title = title.strip()
-                
-                if title:
-                    current_header = title
-                buffer.append(line)
-            else:
+            tier, title = self._classify_header(line)
+            if tier:
+                flush()
+                buffer = []
+                if tier == 'major':
+                    current_major = title
+                    if title not in self.major_order:
+                        self.major_order.append(title)
+                    current_title = title
+                else:  # sub
+                    key = title
+                    n = 2
+                    while key in self.sections or key == current_title:
+                        key = f"{title} ({n})"
+                        n += 1
+                    current_title = key
+                # Reserve the section so duplicate-title detection works even
+                # before any content is flushed.
+                self.sections.setdefault(current_title, "")
+                self.section_major[current_title] = current_major
+            elif not self._is_decoration(line):
                 buffer.append(line)
 
-        # Save last section
-        if buffer:
-            if current_header in self.sections:
-                self.sections[current_header] += "\n" + "\n".join(buffer)
-            else:
-                self.sections[current_header] = "\n".join(buffer)
+        flush()
 
     def _organize_categories(self):
-        for cat in CategoryManager.CATEGORIES.keys():
-            self.categorized_sections[cat] = OrderedDict()
-        self.categorized_sections["Other Checks"] = OrderedDict()
+        """Group sections for the TOC.
 
-        idx = 0
-        for title, content in self.sections.items():
-            category = CategoryManager.get_category(title)
-            self.categorized_sections[category][title] = content
-            self.section_ids[title] = f"s{idx}"
-            idx += 1
+        Preferred grouping uses linpeas' own major sections (faithful and far
+        more reliable than keyword guessing). When no major headers were found
+        - e.g. WinPEAS or plaintext output - fall back to the keyword
+        categoriser.
+        """
+        if self.major_order:
+            groups = list(self.major_order)
+            if any(self.section_major.get(t, "General Information") == "General Information"
+                   for t in self.sections):
+                groups.insert(0, "General Information")
+            for grp in groups:
+                self.categorized_sections.setdefault(grp, OrderedDict())
+
+            idx = 0
+            for title, content in self.sections.items():
+                grp = self.section_major.get(title, "General Information")
+                self.categorized_sections.setdefault(grp, OrderedDict())[title] = content
+                self.section_ids[title] = f"s{idx}"
+                idx += 1
+        else:
+            for cat in CategoryManager.CATEGORIES.keys():
+                self.categorized_sections[cat] = OrderedDict()
+            self.categorized_sections["Other Checks"] = OrderedDict()
+
+            idx = 0
+            for title, content in self.sections.items():
+                category = CategoryManager.get_category(title)
+                self.categorized_sections[category][title] = content
+                self.section_ids[title] = f"s{idx}"
+                idx += 1
 
     def _has_critical_combo(self, line):
         """True if the ANSI SGR sequences include a LinPEAS critical color combo."""
@@ -573,8 +630,10 @@ class ReportGenerator:
                     parts.append(f"<span class='stat-high'>{sections_with_high}H</span>")
                 stats_badge = f"<span class='cat-stats'>{' '.join(parts)}</span>"
 
-            # Count sections for display (excluding General Information)
-            visible_sections = [t for t in sections.keys() if t != "General Information"]
+            # Count sections for display (excluding General Information and
+            # empty major-overview sections, which are skipped when rendered).
+            visible_sections = [t for t, c in sections.items()
+                                if t != "General Information" and c.strip()]
             if not visible_sections:
                 continue
 

