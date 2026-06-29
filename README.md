@@ -12,6 +12,22 @@ manual file transfer, no internet on the target.
 
 ---
 
+## Screenshots
+
+**Report summary** — sections grouped by LinPEAS's own categories, with finding dots and a findings bar:
+
+![Report summary](docs/img/report-summary.png)
+
+**Findings only** — one click filters the report and sidebar down to sections with critical/high hits:
+
+![Findings only](docs/img/findings-only.png)
+
+**Full terminal output** — the complete, faithfully-coloured scan; searchable with Ctrl-F:
+
+![Full terminal output](docs/img/terminal.png)
+
+---
+
 ## Why
 
 Raw PEASS output is a wall of scrolling terminal text that's gone the moment
