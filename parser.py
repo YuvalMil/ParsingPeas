@@ -588,10 +588,10 @@ class ReportGenerator:
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
     def generate(self):
-        terminal_json_name = f"terminal_{self.parser.hostname}_{self.timestamp}.json"
-        self._save_terminal_data(terminal_json_name)
-
-        html_content = self._build_html(terminal_json_name)
+        # The full terminal output is embedded directly in the HTML (see
+        # _build_html) so the report is a single self-contained file you can
+        # copy off the box, email, or open via file:// - no sidecar fetch.
+        html_content = self._build_html()
 
         report_name = f"report_{self.parser.hostname}_{self.timestamp}.html"
         with open(self.output_dir / report_name, 'w', encoding='utf-8') as f:
@@ -599,23 +599,10 @@ class ReportGenerator:
 
         return report_name
 
-    def _save_terminal_data(self, filename):
+    def _render_terminal_html(self):
+        """Convert the whole scan to coloured HTML for inline embedding."""
         lines = self.parser.raw_content.splitlines()
-        converted_lines = [self.parser.converter.to_html(line) for line in lines]
-        chunks = ['\n'.join(converted_lines[i:i + CHUNK_SIZE]) for i in range(0, len(converted_lines), CHUNK_SIZE)]
-
-        data = {
-            "meta": {
-                "hostname": self.parser.hostname,
-                "lines": len(lines),
-                "chunks": len(chunks),
-                "generated": self.timestamp
-            },
-            "chunks": chunks
-        }
-
-        with open(self.output_dir / filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f)
+        return '\n'.join(self.parser.converter.to_html(line) for line in lines)
 
     def _section_level(self, title):
         """'critical', 'high' or '' for a section, based on its findings."""
@@ -628,7 +615,7 @@ class ReportGenerator:
             return 'high'
         return ''
 
-    def _build_html(self, json_file):
+    def _build_html(self):
         toc_html = []
         content_html = []
         converter = AnsiConverter()
@@ -740,7 +727,7 @@ class ReportGenerator:
             timestamp=self.timestamp,
             toc='\n'.join(toc_html),
             content='\n'.join(content_html),
-            json_file=json_file,
+            terminal_content=self._render_terminal_html(),
             findings_summary=findings_summary,
             user_badge=user_badge,
             os_badge=os_badge,
@@ -887,42 +874,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
         <div id=\"terminal-view\" class=\"view\">
-            <pre id=\"term-content\"></pre>
+            <pre id=\"term-content\">{terminal_content}</pre>
         </div>
-        <div id=\"loading\">Loading...</div>
     </main>
     <script>
-        const TERMINAL_FILE = '{json_file}';
         const REPORT_ID = '{report_id}';
         const READ_KEY = 'pp_read_' + REPORT_ID;
-        let terminalLoaded = false;
 
         function expandAll(open) {{ document.querySelectorAll('details').forEach(el => el.open = open); }}
 
+        // The full terminal output is embedded inline (single self-contained
+        // file), so switching views is just show/hide - no fetch.
         function switchView(viewName) {{
             document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tabs button').forEach(el => el.classList.remove('active'));
             document.getElementById(viewName + '-view').classList.add('active');
             const btns = document.querySelectorAll('.tabs button');
             if (viewName === 'report') btns[0].classList.add('active'); else btns[1].classList.add('active');
-            if (viewName === 'terminal' && !terminalLoaded) {{ loadTerminal(); }}
-        }}
-
-        // --- Terminal view: render the whole output at once so Ctrl-F works ---
-        async function loadTerminal() {{
-            const loader = document.getElementById('loading');
-            loader.style.display = 'block';
-            try {{
-                const res = await fetch(TERMINAL_FILE);
-                if (!res.ok) throw new Error("HTTP " + res.status);
-                const data = await res.json();
-                document.getElementById('term-content').innerHTML = data.chunks.join("\\n");
-                terminalLoaded = true;
-            }} catch (e) {{
-                document.getElementById('term-content').innerText = "Load failed: " + e;
-            }} finally {{
-                loader.style.display = 'none';
-            }}
         }}
 
         // --- Wrap toggle ---
